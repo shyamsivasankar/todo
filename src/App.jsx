@@ -206,7 +206,7 @@ function App() {
     <div
       className="flex h-screen w-screen overflow-hidden text-text-primary font-display antialiased"
       style={{
-        background: 'var(--color-bg-base) radial-gradient(ellipse 70% 60% at 100% 0%, rgba(19, 55, 236, 0.07) 0%, transparent 65%)',
+        background: 'radial-gradient(circle at 0% 0%, #1a1b26 0%, transparent 50%), radial-gradient(circle at 100% 0%, rgba(88, 28, 135, 0.15) 0%, transparent 50%), radial-gradient(circle at 100% 100%, rgba(19, 55, 236, 0.15) 0%, transparent 50%), var(--color-bg-base)',
       }}
     >
       <div className="flex flex-1 min-w-0 overflow-hidden">

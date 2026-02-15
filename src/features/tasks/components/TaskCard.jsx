@@ -58,15 +58,10 @@ export default function TaskCard({ boardId, columnId, task, isDone = false, onOp
     <article
       ref={setNodeRef}
       style={style}
-      className={`rounded-lg p-4 shadow-sm border transition-lift group ${
-        isDragging
-          ? 'cursor-grabbing opacity-70'
-          : 'cursor-grab'
-      } ${
-        isDone
-          ? 'bg-card/60 border-border/50'
-          : 'bg-card border-border hover:border-primary/50'
-      }`}
+      className={`rounded-lg p-4 transition-lift group backdrop-blur-sm border shadow-sm ${isDragging
+          ? 'cursor-grabbing opacity-70 bg-surface/80 border-primary/50'
+          : 'cursor-grab bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10 glass-card'
+        }`}
       {...attributes}
       {...listeners}
     >

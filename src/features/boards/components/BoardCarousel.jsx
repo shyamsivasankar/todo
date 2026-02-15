@@ -54,11 +54,10 @@ export default function BoardCarousel({ onCreateBoard }) {
               <button
                 type="button"
                 onClick={() => setActiveBoardId(board.id)}
-                className={`w-full p-4 rounded-xl text-left transition-lift cursor-pointer relative overflow-hidden border border-border hover:border-border-light border-l-2 ${
-                  isActive
-                    ? 'bg-surface border-l-primary hover:border-l-primary'
-                    : 'bg-card border-l-transparent hover:border-l-emerald-500'
-                }`}
+                className={`w-full p-4 rounded-xl text-left transition-lift cursor-pointer relative overflow-hidden border border-l-2 backdrop-blur-md ${isActive
+                    ? 'bg-primary/10 border-primary/50 border-l-primary shadow-glow'
+                    : 'bg-white/5 border-white/5 border-l-transparent hover:bg-white/10 hover:border-white/10 hover:border-l-emerald-500'
+                  }`}
               >
                 <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${color.bg} ${color.text} mb-3`}>
                   <Icon className="h-5 w-5" />
@@ -93,7 +92,7 @@ export default function BoardCarousel({ onCreateBoard }) {
         <button
           type="button"
           onClick={onCreateBoard}
-          className="snap-start shrink-0 w-48 p-4 rounded-xl border-2 border-dashed border-border flex flex-col items-center justify-center cursor-pointer hover:bg-surface-light/50 transition-colors group/new"
+          className="snap-start shrink-0 w-48 p-4 rounded-xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors group/new"
         >
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-light text-text-muted group-hover/new:text-primary group-hover/new:bg-primary/10 mb-2 transition-colors">
             <Plus className="h-5 w-5" />
@@ -105,7 +104,7 @@ export default function BoardCarousel({ onCreateBoard }) {
       </div>
 
       {/* Right fade */}
-      <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-bg-base to-transparent z-10 pointer-events-none" />
+
     </div>
   )
 }

@@ -29,11 +29,10 @@ export default function ColumnLane({ boardId, column, onCreateTask }) {
   return (
     <section
       ref={setNodeRef}
-      className={`flex h-full min-w-[300px] flex-1 flex-col rounded-xl border transition-colors ${
-        isOver
-          ? 'border-primary/60 bg-primary/5'
-          : 'border-transparent bg-[#151828] border-border/50'
-      }`}
+      className={`flex h-full min-w-[300px] flex-1 flex-col rounded-xl border transition-colors glass-panel ${isOver
+          ? 'border-primary/60 bg-primary/10'
+          : 'border-white/5 bg-white/5 backdrop-blur-md shadow-xl ring-1 ring-white/5'
+        }`}
     >
       {/* Column header */}
       <div className="flex items-center justify-between p-4 sticky top-0 bg-inherit rounded-t-xl z-10 border-b border-border">
