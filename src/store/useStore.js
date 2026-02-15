@@ -87,7 +87,7 @@ let settingsFirstEmit = true
 let activeBoardIdFirstEmit = true
 
 export const useStore = create(
-  subscribeWithSelector((set, get) => ({
+  subscribeWithSelector((set) => ({
     boards: [],
     standaloneTasks: [],
     activeBoardId: null,
@@ -1041,7 +1041,7 @@ export const attachBoardPersistence = () => {
   // Skip the first emission which happens when subscription is attached (during hydration)
   useStore.subscribe(
     (state) => state.boards,
-    (boards) => {
+    () => {
       // Skip the first emission and only persist after hydration is complete
       if (boardsFirstEmit) {
         boardsFirstEmit = false
@@ -1058,7 +1058,7 @@ export const attachBoardPersistence = () => {
   let standaloneTasksFirstEmit = true
   useStore.subscribe(
     (state) => state.standaloneTasks,
-    (standaloneTasks) => {
+    () => {
       if (standaloneTasksFirstEmit) {
         standaloneTasksFirstEmit = false
         return
@@ -1114,3 +1114,4 @@ export const attachBoardPersistence = () => {
     },
   )
 }
+

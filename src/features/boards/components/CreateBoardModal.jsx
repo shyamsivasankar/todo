@@ -167,8 +167,9 @@ export default function CreateBoardModal({ open, onClose, onCreate }) {
 
   // Keep displayOrder in sync when columns are added/removed/reset
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDisplayOrder(columns.map((_, i) => i))
-  }, [columns.length])
+  }, [columns])
 
   const handleDragStart = ({ active }) => {
     setActiveId(active.id)

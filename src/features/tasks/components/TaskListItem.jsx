@@ -39,7 +39,7 @@ function formatDueDateShort(dateStr) {
 }
 
 export default function TaskListItem({ item, isSelected, onSelect }) {
-  const { task, boardName, status, isStandalone } = item
+  const { task, status, isStandalone } = item
   const priority = task.settings?.priority || 'medium'
   const pStyle = priorityStyles[priority] || priorityStyles.medium
   const dueInfo = formatDueDateShort(task.settings?.dueDate)

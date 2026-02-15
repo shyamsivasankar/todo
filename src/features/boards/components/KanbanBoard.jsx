@@ -55,7 +55,7 @@ export default function KanbanBoard({ board, onCreateTask, searchQuery = '', fil
       ...column,
       tasks: filterAndSortTasks(column.tasks || [], searchQuery, filter, sort),
     }))
-  }, [board?.columns, searchQuery, filter?.priority, filter?.dueDateOnly, sort?.by, sort?.dir])
+  }, [board, searchQuery, filter, sort])
 
   if (!board) {
     return (

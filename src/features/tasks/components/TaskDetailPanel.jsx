@@ -8,7 +8,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../../../store/useStore'
 
 const priorityOptions = ['low', 'medium', 'high']
@@ -39,11 +39,8 @@ function formatCreatedDate(dateStr) {
 }
 
 export default function TaskDetailPanel({ taskItem, onClose }) {
-  const boards = useStore((state) => state.boards)
-  const standaloneTasks = useStore((state) => state.standaloneTasks)
   const updateTask = useStore((state) => state.updateTask)
   const removeTask = useStore((state) => state.removeTask)
-  const moveTaskToBoard = useStore((state) => state.moveTaskToBoard)
   const uiSettings = useStore((state) => state.uiSettings)
 
   const { task, boardId, boardName, columnId, status, isStandalone } = taskItem
@@ -59,6 +56,7 @@ export default function TaskDetailPanel({ taskItem, onClose }) {
   const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFormState({
       heading: task.heading || '',
       tldr: task.tldr || '',

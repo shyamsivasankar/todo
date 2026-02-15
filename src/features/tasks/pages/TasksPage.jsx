@@ -41,7 +41,6 @@ function groupTasksByDate(tasks) {
 export default function TasksPage({ onCreateTask }) {
   const boards = useStore((state) => state.boards)
   const standaloneTasks = useStore((state) => state.standaloneTasks)
-  const openTaskDetail = useStore((state) => state.openTaskDetail)
 
   const [search, setSearch] = useState('')
   const [selectedTaskItem, setSelectedTaskItem] = useState(null)
@@ -107,6 +106,7 @@ export default function TasksPage({ onCreateTask }) {
         (item) => item.task.id === selectedTaskItem.task.id
       )
       if (!exists) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setSelectedTaskItem(null)
       } else if (exists !== selectedTaskItem) {
         setSelectedTaskItem(exists)

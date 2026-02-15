@@ -46,6 +46,7 @@ export default function TaskDetailModal() {
   useEffect(() => {
     if (!taskContext) return
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFormState({
       heading: taskContext.task.heading,
       tldr: taskContext.task.tldr,

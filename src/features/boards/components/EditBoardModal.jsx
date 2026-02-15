@@ -6,9 +6,10 @@ export default function EditBoardModal({ open, board, onClose, onSave }) {
 
   useEffect(() => {
     if (open && board) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setName(board.name ?? '')
     }
-  }, [open, board?.name])
+  }, [open, board])
 
   if (!open) return null
 

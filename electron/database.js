@@ -276,7 +276,7 @@ export const boardOperations = {
         `)
         const insertTimeline = db.prepare('INSERT INTO task_timeline (task_id, timestamp, action) VALUES (?, ?, ?)')
 
-        boards.forEach((board, boardIndex) => {
+        boards.forEach((board) => {
           if (!board.id || !board.name) {
             console.error('Invalid board:', board)
             return

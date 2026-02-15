@@ -23,7 +23,7 @@ export default function GanttTimelineView({ priorityFilter = null }) {
   const standaloneTasks = useStore((state) => state.standaloneTasks)
   const openTaskDetail = useStore((state) => state.openTaskDetail)
 
-  const [rangeStart, setRangeStart] = useState(() => {
+  const [rangeStart] = useState(() => {
     const d = new Date()
     d.setDate(d.getDate() - 7)
     return d
@@ -194,7 +194,7 @@ export default function GanttTimelineView({ priorityFilter = null }) {
             {/* Grid lines */}
             <div className="absolute inset-0 flex pointer-events-none">
               {weekRanges.flatMap((range) =>
-                range.days.map((d, i) => {
+                range.days.map((d) => {
                   const key = toDateKey(d.toISOString())
                   const isToday = key === todayKey
                   const left = getDayLeft(d)
@@ -228,7 +228,7 @@ export default function GanttTimelineView({ priorityFilter = null }) {
             })()}
 
             {/* Task bars */}
-            {boardsWithTasks.map(({ board, tasks }, rowIndex) => (
+            {boardsWithTasks.map(({ board, tasks }) => (
               <div
                 key={board.id}
                 className="relative border-b border-border"
@@ -323,3 +323,4 @@ export default function GanttTimelineView({ priorityFilter = null }) {
     </main>
   )
 }
+
