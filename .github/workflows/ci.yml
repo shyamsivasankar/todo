@@ -69,6 +69,9 @@ jobs:
       - name: Build application
         run: npm run build
 
+      - name: List build output
+        run: ls -R dist/
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
