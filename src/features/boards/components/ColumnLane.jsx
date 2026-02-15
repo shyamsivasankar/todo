@@ -3,15 +3,21 @@ import { MoreHorizontal, Plus } from 'lucide-react'
 import TaskCard from '../../tasks/components/TaskCard'
 import { useStore } from '../../../store/useStore'
 
-const columnStatusColors = {
-  'To Do': 'bg-slate-400',
-  'In Progress': 'bg-primary animate-pulse-dot',
-  'Done': 'bg-emerald-500',
-  'Review': 'bg-purple-500',
-  'Backlog': 'bg-slate-500',
-}
+/** One colour per stage index so each column has a distinct dot. */
+const columnDotColors = [
+  'bg-slate-400',
+  'bg-primary',
+  'bg-emerald-500',
+  'bg-purple-500',
+  'bg-amber-500',
+  'bg-rose-500',
+  'bg-cyan-500',
+  'bg-violet-500',
+  'bg-orange-500',
+  'bg-teal-500',
+]
 
-export default function ColumnLane({ boardId, column, onCreateTask }) {
+export default function ColumnLane({ boardId, column, columnIndex = 0, onCreateTask }) {
   const openTaskDetail = useStore((state) => state.openTaskDetail)
   const isDoneColumn = column.title.toLowerCase() === 'done'
 
@@ -24,7 +30,7 @@ export default function ColumnLane({ boardId, column, onCreateTask }) {
     },
   })
 
-  const statusDot = columnStatusColors[column.title] || 'bg-slate-400'
+  const statusDot = columnDotColors[columnIndex % columnDotColors.length]
 
   return (
     <section

@@ -67,11 +67,12 @@ export default function KanbanBoard({ board, onCreateTask, searchQuery = '', fil
 
   return (
     <div className="flex h-full gap-6 overflow-x-auto pb-2 custom-scrollbar">
-      {columnsWithFilteredTasks.map((column) => (
+      {columnsWithFilteredTasks.map((column, index) => (
         <ColumnLane
           key={column.id}
           boardId={board.id}
           column={column}
+          columnIndex={index}
           onCreateTask={onCreateTask}
         />
       ))}

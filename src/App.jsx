@@ -1,5 +1,5 @@
 import { DndContext, PointerSensor, closestCorners, useSensor, useSensors } from '@dnd-kit/core'
-import { ChevronDown, Filter, Plus, Search, SortAsc } from 'lucide-react'
+import { ChevronDown, ChevronUp, Filter, Plus, Search, SortAsc } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import BoardCarousel from './features/boards/components/BoardCarousel'
 import AppSidebar from './features/layout/components/AppSidebar'
@@ -14,6 +14,7 @@ const SettingsPage = lazy(() => import('./features/settings/pages/SettingsPage')
 
 // Lazy-loaded modals
 const CreateBoardModal = lazy(() => import('./features/boards/components/CreateBoardModal'))
+const EditBoardModal = lazy(() => import('./features/boards/components/EditBoardModal'))
 const CreateTaskModal = lazy(() => import('./features/tasks/components/CreateTaskModal'))
 const TaskDetailModal = lazy(() => import('./features/tasks/components/TaskDetailModal'))
 
@@ -21,7 +22,9 @@ function App() {
   const boards = useStore((state) => state.boards)
   const activeBoardId = useStore((state) => state.activeBoardId)
   const createBoard = useStore((state) => state.createBoard)
+  const renameBoard = useStore((state) => state.renameBoard)
   const uiSettings = useStore((state) => state.uiSettings)
+  const updateSettings = useStore((state) => state.updateSettings)
   const hydrateBoards = useStore((state) => state.hydrateBoards)
   const hydrateDeletedTasks = useStore((state) => state.hydrateDeletedTasks)
   const hydrateSettings = useStore((state) => state.hydrateSettings)
@@ -31,6 +34,7 @@ function App() {
 
   const [activeView, setActiveView] = useState('boards')
   const [boardModalOpen, setBoardModalOpen] = useState(false)
+  const [boardToEdit, setBoardToEdit] = useState(null)
   const [taskModalState, setTaskModalState] = useState({
     open: false,
     boardId: null,
@@ -198,8 +202,8 @@ function App() {
     setTaskModalState({ open: true, boardId, columnId })
   }
 
-  const handleCreateBoard = (name) => {
-    createBoard(name)
+  const handleCreateBoard = (name, columnTitles) => {
+    createBoard(name, columnTitles)
   }
 
   return (
@@ -218,13 +222,47 @@ function App() {
           <main className="flex-1 flex flex-col h-full min-w-0 relative overflow-hidden">
             {/* Header */}
             <header className="pt-8 pb-4 px-8 flex flex-col gap-6 shrink-0 z-30 relative">
-              {/* Title row */}
-              <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-white">Personal Boards</h1>
-              </div>
-
-              {/* Board Carousel */}
-              <BoardCarousel onCreateBoard={() => setBoardModalOpen(true)} />
+              {/* Board switcher: full carousel + handle, or single-line breadcrumb when collapsed */}
+              {uiSettings.boardSwitcherExpanded !== false ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <h1 className="text-2xl font-bold text-white">Personal Boards</h1>
+                  </div>
+                  <BoardCarousel
+                    onCreateBoard={() => setBoardModalOpen(true)}
+                    onEditBoard={(board) => setBoardToEdit(board)}
+                  />
+                  <div className="flex items-center w-full -mb-1">
+                    <span className="flex-1 border-t border-border" aria-hidden />
+                    <button
+                      type="button"
+                      onClick={() => updateSettings({ boardSwitcherExpanded: false })}
+                      className="shrink-0 p-1.5 rounded-lg text-text-muted hover:text-primary hover:bg-white/5 transition-colors"
+                      title="Collapse board switcher"
+                    >
+                      <ChevronUp className="h-4 w-4" />
+                    </button>
+                    <span className="flex-1 border-t border-border" aria-hidden />
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center justify-between border-b border-border pb-4">
+                  <span className="text-sm text-text-muted truncate min-w-0">
+                    <span className="text-text-muted">Personal Boards</span>
+                    <span className="mx-1.5 text-border">›</span>
+                    <span className="text-white font-medium">{activeBoard?.name ?? 'No board selected'}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => updateSettings({ boardSwitcherExpanded: true })}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg text-text-muted hover:bg-surface-light hover:text-primary transition-colors shrink-0"
+                    title="Expand board switcher"
+                  >
+                    Boards
+                    <ChevronDown className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
 
               {/* Search + Filter bar */}
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-4">
@@ -409,6 +447,21 @@ function App() {
               open={boardModalOpen}
               onClose={() => setBoardModalOpen(false)}
               onCreate={handleCreateBoard}
+            />
+          </Suspense>
+        )}
+
+        {/* Edit Board Modal */}
+        {boardToEdit && (
+          <Suspense fallback={null}>
+            <EditBoardModal
+              open={!!boardToEdit}
+              board={boardToEdit}
+              onClose={() => setBoardToEdit(null)}
+              onSave={(boardId, name) => {
+                renameBoard(boardId, name)
+                setBoardToEdit(null)
+              }}
             />
           </Suspense>
         )}

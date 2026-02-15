@@ -2,6 +2,7 @@ import {
   Briefcase,
   Dumbbell,
   Palette,
+  Pencil,
   Plus,
   Trash2,
 } from 'lucide-react'
@@ -21,7 +22,7 @@ function getTaskCount(board) {
   return board.columns.reduce((sum, col) => sum + (col.tasks?.length || 0), 0)
 }
 
-export default function BoardCarousel({ onCreateBoard }) {
+export default function BoardCarousel({ onCreateBoard, onEditBoard }) {
   const boards = useStore((state) => state.boards)
   const activeBoardId = useStore((state) => state.activeBoardId)
   const setActiveBoardId = useStore((state) => state.setActiveBoardId)
@@ -76,14 +77,26 @@ export default function BoardCarousel({ onCreateBoard }) {
                   )}
                 </div>
               </button>
-              <button
-                type="button"
-                onClick={(e) => handleDeleteBoard(e, board)}
-                className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-surface/90 text-text-muted hover:text-rose-400 hover:bg-rose-500/10 border border-border opacity-0 group-hover/card:opacity-100 transition-opacity z-10"
-                title={`Delete board "${board.name}"`}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover/card:opacity-100 transition-opacity z-10">
+                {onEditBoard && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onEditBoard(board) }}
+                    className="p-1.5 rounded-lg bg-surface/90 text-text-muted hover:text-primary hover:bg-primary/10 border border-border"
+                    title="Edit board settings"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={(e) => handleDeleteBoard(e, board)}
+                  className="p-1.5 rounded-lg bg-surface/90 text-text-muted hover:text-rose-400 hover:bg-rose-500/10 border border-border"
+                  title={`Delete board "${board.name}"`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
           )
         })}

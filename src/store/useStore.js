@@ -13,6 +13,16 @@ const createDefaultColumns = () => [
   { id: uuidv4(), title: 'Done', tasks: [] },
 ]
 
+/** Build columns from an array of stage titles (e.g. from Create Board modal). */
+const createColumnsFromTitles = (titles) => {
+  if (!Array.isArray(titles) || titles.length === 0) return createDefaultColumns()
+  return titles.filter(Boolean).map((title) => ({
+    id: uuidv4(),
+    title: String(title).trim() || 'Untitled',
+    tasks: [],
+  }))
+}
+
 const defaultTaskSettings = {
   priority: 'medium',
   tags: [],
@@ -25,6 +35,7 @@ const defaultUiSettings = {
   tasksPageSize: 6,
   defaultTaskPriority: 'medium',
   confirmBeforeDelete: true,
+  boardSwitcherExpanded: true,
 }
 
 const describeTaskUpdate = (previousTask, updates) => {
@@ -144,13 +155,13 @@ export const useStore = create(
         }
       }),
 
-    createBoard: (boardName) => {
+    createBoard: (boardName, columnTitles) => {
       const result = set((state) => {
         const name = boardName?.trim() || `Board ${state.boards.length + 1}`
         const nextBoard = {
           id: uuidv4(),
           name,
-          columns: createDefaultColumns(),
+          columns: createColumnsFromTitles(columnTitles),
           createdAt: new Date().toISOString(),
         }
 
