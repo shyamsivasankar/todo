@@ -1,16 +1,21 @@
 import { DndContext, PointerSensor, closestCorners, useSensor, useSensors } from '@dnd-kit/core'
 import { ChevronDown, Filter, Plus, Search, SortAsc } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import BoardCarousel from './features/boards/components/BoardCarousel'
-import CreateBoardModal from './features/boards/components/CreateBoardModal'
-import KanbanBoard from './features/boards/components/KanbanBoard'
-import CalendarPage from './features/calendar/pages/CalendarPage'
 import AppSidebar from './features/layout/components/AppSidebar'
-import SettingsPage from './features/settings/pages/SettingsPage'
-import CreateTaskModal from './features/tasks/components/CreateTaskModal'
-import TaskDetailModal from './features/tasks/components/TaskDetailModal'
-import TasksPage from './features/tasks/pages/TasksPage'
+import LoadingFallback from './components/LoadingFallback'
 import { attachBoardPersistence, useStore } from './store/useStore'
+
+// Lazy-loaded views
+const KanbanBoard = lazy(() => import('./features/boards/components/KanbanBoard'))
+const TasksPage = lazy(() => import('./features/tasks/pages/TasksPage'))
+const CalendarPage = lazy(() => import('./features/calendar/pages/CalendarPage'))
+const SettingsPage = lazy(() => import('./features/settings/pages/SettingsPage'))
+
+// Lazy-loaded modals
+const CreateBoardModal = lazy(() => import('./features/boards/components/CreateBoardModal'))
+const CreateTaskModal = lazy(() => import('./features/tasks/components/CreateTaskModal'))
+const TaskDetailModal = lazy(() => import('./features/tasks/components/TaskDetailModal'))
 
 function App() {
   const boards = useStore((state) => state.boards)
@@ -195,8 +200,6 @@ function App() {
 
   const handleCreateBoard = (name) => {
     createBoard(name)
-    // The store creates default columns, but we could extend this to accept custom columns
-    // For now, the board is created with defaults
   }
 
   return (
@@ -347,21 +350,18 @@ function App() {
             {/* Kanban Board */}
             <div className="flex-1 overflow-x-auto px-8 pb-8 custom-scrollbar z-0 relative">
               {!hydrationComplete ? (
-                <div className="flex h-full items-center justify-center rounded-xl border border-border bg-surface/40 text-text-muted">
-                  <div className="flex items-center gap-3">
-                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                    Loading workspace...
-                  </div>
-                </div>
+                <LoadingFallback message="Loading workspace..." />
               ) : (
                 <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
-                  <KanbanBoard
-                    board={activeBoard}
-                    onCreateTask={openTaskCreateModal}
-                    searchQuery={boardTaskSearch}
-                    filter={boardTaskFilter}
-                    sort={boardTaskSort}
-                  />
+                  <Suspense fallback={<LoadingFallback message="Loading board..." />}>
+                    <KanbanBoard
+                      board={activeBoard}
+                      onCreateTask={openTaskCreateModal}
+                      searchQuery={boardTaskSearch}
+                      filter={boardTaskFilter}
+                      sort={boardTaskSort}
+                    />
+                  </Suspense>
                 </DndContext>
               )}
             </div>
@@ -371,41 +371,59 @@ function App() {
         {/* Tasks View */}
         {activeView === 'tasks' && (
           <div className="flex-1 overflow-hidden">
-            <TasksPage onCreateTask={openTaskCreateModal} />
+            <Suspense fallback={<LoadingFallback message="Loading tasks..." />}>
+              <TasksPage onCreateTask={openTaskCreateModal} />
+            </Suspense>
           </div>
         )}
 
         {/* Calendar / Timeline View */}
         {activeView === 'calendar' && (
           <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
-            <CalendarPage onCreateTask={openTaskCreateModal} />
+            <Suspense fallback={<LoadingFallback message="Loading calendar..." />}>
+              <CalendarPage onCreateTask={openTaskCreateModal} />
+            </Suspense>
           </div>
         )}
 
         {/* Settings View */}
         {activeView === 'settings' && (
           <main className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-            <SettingsPage />
+            <Suspense fallback={<LoadingFallback message="Loading settings..." />}>
+              <SettingsPage />
+            </Suspense>
           </main>
         )}
 
-        {/* Task Detail Modal (for board view) */}
-        {selectedTask ? <TaskDetailModal /> : null}
+        {/* Task Detail Modal (lazy loaded only when needed) */}
+        {selectedTask && (
+          <Suspense fallback={null}>
+            <TaskDetailModal />
+          </Suspense>
+        )}
 
         {/* Create Board Modal */}
-        <CreateBoardModal
-          open={boardModalOpen}
-          onClose={() => setBoardModalOpen(false)}
-          onCreate={handleCreateBoard}
-        />
+        {boardModalOpen && (
+          <Suspense fallback={null}>
+            <CreateBoardModal
+              open={boardModalOpen}
+              onClose={() => setBoardModalOpen(false)}
+              onCreate={handleCreateBoard}
+            />
+          </Suspense>
+        )}
 
         {/* Create Task Modal */}
-        <CreateTaskModal
-          open={taskModalState.open}
-          defaultBoardId={taskModalState.boardId}
-          defaultColumnId={taskModalState.columnId}
-          onClose={() => setTaskModalState({ open: false, boardId: null, columnId: null })}
-        />
+        {taskModalState.open && (
+          <Suspense fallback={null}>
+            <CreateTaskModal
+              open={taskModalState.open}
+              defaultBoardId={taskModalState.boardId}
+              defaultColumnId={taskModalState.columnId}
+              onClose={() => setTaskModalState({ open: false, boardId: null, columnId: null })}
+            />
+          </Suspense>
+        )}
       </div>
     </div>
   )
