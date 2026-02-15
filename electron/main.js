@@ -28,7 +28,7 @@ const createWindow = () => {
 
   // Open DevTools automatically in development mode
   if (isDev) {
-    win.webContents.openDevTools()
+    // win.webContents.openDevTools()
   }
 
   if (isDev) {
