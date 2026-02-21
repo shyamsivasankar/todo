@@ -91,6 +91,7 @@ function initializeSchema() {
       description TEXT DEFAULT '',
       priority TEXT DEFAULT 'medium',
       tags TEXT DEFAULT '[]',
+      extended_data TEXT DEFAULT '{}',
       due_date TEXT DEFAULT '',
       status TEXT NOT NULL,
       position INTEGER NOT NULL,
@@ -99,6 +100,18 @@ function initializeSchema() {
       FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
     )
   `)
+
+  // Migration: Add extended_data to tasks if missing
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(tasks)").all()
+    const hasExtendedData = tableInfo.some(col => col.name === 'extended_data')
+    if (!hasExtendedData) {
+      db.prepare("ALTER TABLE tasks ADD COLUMN extended_data TEXT DEFAULT '{}'").run()
+      console.log('[DB] Migration: Added extended_data column to tasks table')
+    }
+  } catch (error) {
+    console.error('[DB] Migration failed:', error)
+  }
 
   // Task timeline table
   db.exec(`
@@ -202,6 +215,7 @@ export const boardOperations = {
         }))
 
       const tags = JSON.parse(task.tags || '[]')
+      const extendedData = JSON.parse(task.extended_data || '{}')
       
       const taskData = {
         id: task.id,
@@ -214,6 +228,10 @@ export const boardOperations = {
           tags: tags,
           dueDate: task.due_date || '',
           status: task.status
+        },
+        extendedData: {
+          checklists: extendedData.checklists || [],
+          attachments: extendedData.attachments || []
         },
         timeline: taskTimeline
       }
@@ -271,8 +289,8 @@ export const boardOperations = {
         const insertTask = db.prepare(`
           INSERT INTO tasks (
             id, board_id, column_id, heading, tldr, description, 
-            priority, tags, due_date, status, position, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            priority, tags, extended_data, due_date, status, position, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         const insertTimeline = db.prepare('INSERT INTO task_timeline (task_id, timestamp, action) VALUES (?, ?, ?)')
 
@@ -301,6 +319,7 @@ export const boardOperations = {
                   }
                   
                   const tagsJson = JSON.stringify(task.settings?.tags || [])
+                  const extendedDataJson = JSON.stringify(task.extendedData || {})
                   insertTask.run(
                     task.id,
                     board.id,
@@ -310,6 +329,7 @@ export const boardOperations = {
                     task.description || '',
                     task.settings?.priority || 'medium',
                     tagsJson,
+                    extendedDataJson,
                     task.settings?.dueDate || '',
                     task.settings?.status || column.title,
                     taskIndex,
@@ -337,6 +357,7 @@ export const boardOperations = {
             }
             
             const tagsJson = JSON.stringify(task.settings?.tags || [])
+            const extendedDataJson = JSON.stringify(task.extendedData || {})
             insertTask.run(
               task.id,
               null, // board_id is NULL for standalone tasks
@@ -346,6 +367,7 @@ export const boardOperations = {
               task.description || '',
               task.settings?.priority || 'medium',
               tagsJson,
+              extendedDataJson,
               task.settings?.dueDate || '',
               task.settings?.status || 'To Do',
               taskIndex,

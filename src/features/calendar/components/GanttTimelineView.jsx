@@ -6,16 +6,19 @@ import {
   getWeekRanges,
   formatDayShort,
   toDateKey,
+  calculateGanttLanes,
 } from '../utils/calendarTasks'
 
-const ROW_HEIGHT = 80
+const MIN_ROW_HEIGHT = 80
+const LANE_HEIGHT = 40
+const ROW_PADDING = 16
 const DAY_WIDTH = 56
 const SIDEBAR_WIDTH = 260
 
 const PRIORITY_BAR_COLORS = {
-  high: 'bg-red-500/80 border-red-500/50',
-  medium: 'bg-emerald-600/80 border-emerald-500/50',
-  low: 'bg-primary border-primary/50',
+  high: 'bg-red-500/20 backdrop-blur-md border-red-500/30 ring-1 ring-red-500/20 shadow-[0_0_15px_rgba(239,68,68,0.15)] hover:shadow-[0_0_20px_rgba(239,68,68,0.25)] hover:ring-red-500/50',
+  medium: 'bg-emerald-500/20 backdrop-blur-md border-emerald-500/30 ring-1 ring-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.15)] hover:shadow-[0_0_20px_rgba(16,185,129,0.25)] hover:ring-emerald-500/50',
+  low: 'bg-primary/20 backdrop-blur-md border-primary/30 ring-1 ring-primary/20 shadow-[0_0_15px_rgba(19,55,236,0.15)] hover:shadow-[0_0_20px_rgba(19,55,236,0.25)] hover:ring-primary/50',
 }
 
 export default function GanttTimelineView({ priorityFilter = null }) {
@@ -58,12 +61,20 @@ export default function GanttTimelineView({ priorityFilter = null }) {
     [rangeStart, numWeeks],
   )
 
-  const todayKey = toDateKey(new Date().toISOString())
+  const todayKey = useMemo(() => toDateKey(new Date()), [])
   const allDays = useMemo(
     () => weekRanges.flatMap((r) => r.days),
     [weekRanges],
   )
   const totalWidth = allDays.length * DAY_WIDTH
+
+  const dayOffsets = useMemo(() => {
+    const map = new Map()
+    allDays.forEach((d, idx) => {
+      map.set(toDateKey(d), idx * DAY_WIDTH)
+    })
+    return map
+  }, [allDays])
 
   const boardsWithTasks = useMemo(() => {
     if (!weekRanges.length) return []
@@ -79,22 +90,28 @@ export default function GanttTimelineView({ priorityFilter = null }) {
       const boardTasks = ganttTasks.filter(
         (item) => item.boardId === board.id && inRange(item),
       )
-      byBoard.set(board.id, { board, tasks: boardTasks })
+      const { tasksWithLane, totalLanes } = calculateGanttLanes(boardTasks)
+      byBoard.set(board.id, { board, tasks: tasksWithLane, totalLanes })
     }
     const standalones = ganttTasks.filter(
       (item) => item.boardId === null && inRange(item),
     )
+    const { tasksWithLane: standaloneTasksWithLane, totalLanes: standaloneTotalLanes } =
+      calculateGanttLanes(standalones)
     byBoard.set('standalone', {
       board: { id: 'standalone', name: 'No Board', columns: [] },
-      tasks: standalones,
+      tasks: standaloneTasksWithLane,
+      totalLanes: standaloneTotalLanes,
     })
     return Array.from(byBoard.values())
   }, [boards, ganttTasks, weekRanges])
 
+  const getRowHeight = (totalLanes) =>
+    Math.max(MIN_ROW_HEIGHT, totalLanes * LANE_HEIGHT + ROW_PADDING)
+
   const getDayLeft = (d) => {
-    const key = toDateKey(d.toISOString())
-    const idx = allDays.findIndex((day) => toDateKey(day.toISOString()) === key)
-    return idx >= 0 ? idx * DAY_WIDTH : 0
+    const key = toDateKey(d)
+    return dayOffsets.get(key) ?? 0
   }
 
   return (
@@ -127,7 +144,7 @@ export default function GanttTimelineView({ priorityFilter = null }) {
                   </div>
                   <div className="flex border-t border-border">
                     {range.days.map((d) => {
-                      const key = toDateKey(d.toISOString())
+                      const key = toDateKey(d)
                       const isToday = key === todayKey
                       return (
                         <div
@@ -159,22 +176,25 @@ export default function GanttTimelineView({ priorityFilter = null }) {
           className="flex flex-1 overflow-auto custom-scrollbar"
         >
           <div
-            className="shrink-0 border-r border-border bg-surface sticky left-0 z-10 shadow-[4px_0_24px_rgba(0,0,0,0.2)]"
+            className="shrink-0 border-r border-border bg-surface sticky left-0 z-10 shadow-[4px_0_24px_rgba(0,0,0,0.2)] min-h-full"
             style={{ width: SIDEBAR_WIDTH }}
           >
             {boardsWithTasks.length === 0 ? (
               <div
                 className="flex items-center justify-center border-b border-border text-sm italic text-text-muted"
-                style={{ height: ROW_HEIGHT }}
+                style={{ height: MIN_ROW_HEIGHT }}
               >
                 No boards with tasks
               </div>
             ) : (
-              boardsWithTasks.map(({ board, tasks }) => (
+              boardsWithTasks.map(({ board, tasks, totalLanes }) => (
                 <div
                   key={board.id}
                   className="flex flex-col justify-center border-b border-border p-4 transition-colors hover:bg-card-hover"
-                  style={{ height: ROW_HEIGHT, minHeight: ROW_HEIGHT }}
+                  style={{
+                    height: getRowHeight(totalLanes),
+                    minHeight: getRowHeight(totalLanes),
+                  }}
                 >
                   <h3 className="text-sm font-semibold text-white">
                     {board.name}
@@ -188,14 +208,14 @@ export default function GanttTimelineView({ priorityFilter = null }) {
           </div>
 
           <div
-            className="relative flex-1 min-w-0 bg-bg-base"
+            className="relative flex-1 min-w-0 bg-bg-base min-h-full"
             style={{ width: totalWidth }}
           >
             {/* Grid lines */}
-            <div className="absolute inset-0 flex pointer-events-none">
+            <div className="absolute inset-0 pointer-events-none">
               {weekRanges.flatMap((range) =>
                 range.days.map((d) => {
-                  const key = toDateKey(d.toISOString())
+                  const key = toDateKey(d)
                   const isToday = key === todayKey
                   const left = getDayLeft(d)
                   return (
@@ -228,22 +248,25 @@ export default function GanttTimelineView({ priorityFilter = null }) {
             })()}
 
             {/* Task bars */}
-            {boardsWithTasks.map(({ board, tasks }) => (
+            {boardsWithTasks.map(({ board, tasks, totalLanes }) => (
               <div
                 key={board.id}
                 className="relative border-b border-border"
-                style={{ height: ROW_HEIGHT, minHeight: ROW_HEIGHT }}
+                style={{
+                  height: getRowHeight(totalLanes),
+                  minHeight: getRowHeight(totalLanes),
+                }}
               >
-                {tasks.map((item, taskIndex) => {
+                {tasks.map((item) => {
                   const startLeft = getDayLeft(item.startDate)
                   const endLeft = getDayLeft(item.endDate) + DAY_WIDTH
                   const width = Math.max(DAY_WIDTH * 0.6, endLeft - startLeft)
-                  const top = 12 + (taskIndex % 2) * 36
+                  const top = 12 + item.laneIndex * LANE_HEIGHT
                   const priority = item.task.settings?.priority || 'medium'
                   return (
                     <div
                       key={item.task.id}
-                      className={`group absolute z-10 flex cursor-pointer items-center rounded-md border px-2 shadow-sm transition-all hover:ring-2 hover:ring-primary/50 ${PRIORITY_BAR_COLORS[priority] || PRIORITY_BAR_COLORS.medium}`}
+                      className={`group absolute z-10 flex cursor-pointer items-center rounded-md border px-2 shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/50 ${PRIORITY_BAR_COLORS[priority] || PRIORITY_BAR_COLORS.medium}`}
                       style={{
                         left: startLeft + 4,
                         top,
@@ -251,9 +274,16 @@ export default function GanttTimelineView({ priorityFilter = null }) {
                         minWidth: 80,
                         height: 32,
                       }}
+                      tabIndex={0}
                       onClick={() =>
                         openTaskDetail(item.boardId, item.columnId, item.task.id)
                       }
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          openTaskDetail(item.boardId, item.columnId, item.task.id)
+                        }
+                      }}
                       title={item.task.heading}
                     >
                       <div
@@ -265,11 +295,11 @@ export default function GanttTimelineView({ priorityFilter = null }) {
                               : 'bg-emerald-500'
                         }`}
                       />
-                      <span className="truncate text-xs font-semibold text-white">
+                      <span className="truncate text-xs font-semibold text-white [text-shadow:_0_1px_2px_rgb(0_0_0_/_40%)]">
                         {item.task.heading}
                       </span>
                       {/* Tooltip on hover */}
-                      <div className="absolute left-1/2 top-full z-50 mt-2 w-64 -translate-x-1/2 rounded-lg border border-border bg-surface p-3 shadow-xl opacity-0 pointer-events-none transition-opacity duration-200 group-hover:opacity-100">
+                      <div className="absolute left-1/2 top-full z-50 mt-2 w-64 -translate-x-1/2 rounded-lg border border-white/10 bg-surface/90 backdrop-blur-xl p-3 shadow-2xl opacity-0 pointer-events-none transition-all duration-200 group-hover:opacity-100 group-hover:translate-y-1">
                         <div className="mb-2 flex items-start justify-between">
                           <h4 className="text-sm font-bold leading-tight text-white">
                             {item.task.heading}
@@ -302,7 +332,7 @@ export default function GanttTimelineView({ priorityFilter = null }) {
                             })}
                           </span>
                         </div>
-                        <div className="absolute -top-1.5 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 border-l border-t border-border bg-surface" />
+                        <div className="absolute -top-1.5 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 border-l border-t border-white/10 bg-surface/90 backdrop-blur-xl" />
                       </div>
                     </div>
                   )
@@ -310,7 +340,7 @@ export default function GanttTimelineView({ priorityFilter = null }) {
                 {tasks.length === 0 && (
                   <div
                     className="flex items-center justify-center text-sm italic text-text-muted/50"
-                    style={{ height: ROW_HEIGHT }}
+                    style={{ height: getRowHeight(totalLanes) }}
                   >
                     No tasks in range
                   </div>

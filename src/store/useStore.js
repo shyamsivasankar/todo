@@ -30,6 +30,11 @@ const defaultTaskSettings = {
   status: 'To Do',
 }
 
+const defaultExtendedData = {
+  checklists: [],
+  attachments: [],
+}
+
 const defaultUiSettings = {
   startView: 'boards',
   tasksPageSize: 6,
@@ -98,12 +103,31 @@ export const useStore = create(
 
     hydrateBoards: (boards, savedActiveBoardId = null, standaloneTasks = []) =>
       set((state) => {
-        const safeBoards = Array.isArray(boards) ? boards : []
-        const safeStandaloneTasks = Array.isArray(standaloneTasks) ? standaloneTasks : []
+        const ensureTaskExtendedData = (task) => ({
+          ...task,
+          extendedData: {
+            ...defaultExtendedData,
+            ...(task.extendedData || {}),
+          },
+        })
+
+        const safeBoards = (Array.isArray(boards) ? boards : []).map((board) => ({
+          ...board,
+          columns: (board.columns || []).map((column) => ({
+            ...column,
+            tasks: (column.tasks || []).map(ensureTaskExtendedData),
+          })),
+        }))
+
+        const safeStandaloneTasks = (Array.isArray(standaloneTasks) ? standaloneTasks : []).map(
+          ensureTaskExtendedData,
+        )
+
         // Use saved activeBoardId if available and valid, otherwise default to first board
-        const activeBoardId = savedActiveBoardId && safeBoards.some(b => b.id === savedActiveBoardId)
-          ? savedActiveBoardId
-          : safeBoards[0]?.id ?? null
+        const activeBoardId =
+          savedActiveBoardId && safeBoards.some((b) => b.id === savedActiveBoardId)
+            ? savedActiveBoardId
+            : safeBoards[0]?.id ?? null
         const newState = {
           boards: safeBoards,
           standaloneTasks: safeStandaloneTasks,
@@ -187,27 +211,30 @@ export const useStore = create(
         try {
           // Use same save logic as saveBoardsToDisk - includes localStorage fallback
           if (window.electronAPI?.saveBoards) {
-            console.log('[Store] Saving boards via Electron API:', { 
-              boardsCount: currentState.boards.length, 
-              activeBoardId: currentState.activeBoardId 
+            console.log('[Store] Saving boards via Electron API:', {
+              boardsCount: currentState.boards.length,
+              activeBoardId: currentState.activeBoardId,
             })
             window.electronAPI.saveBoards(
-              currentState.boards, 
+              currentState.boards,
               currentState.activeBoardId,
-              currentState.standaloneTasks
+              currentState.standaloneTasks,
             )
           } else {
             // Fallback to localStorage when Electron is not available
-            console.log('[Store] Saving boards to localStorage:', { 
+            console.log('[Store] Saving boards to localStorage:', {
               boardsCount: currentState.boards.length,
               standaloneTasksCount: currentState.standaloneTasks.length,
-              activeBoardId: currentState.activeBoardId 
+              activeBoardId: currentState.activeBoardId,
             })
-            localStorage.setItem('todo_boards', JSON.stringify({ 
-              boards: currentState.boards,
-              standaloneTasks: currentState.standaloneTasks,
-              activeBoardId: currentState.activeBoardId 
-            }))
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
           }
         } catch (error) {
           console.error('[Store] Error in direct save after createBoard:', error)
@@ -265,22 +292,25 @@ export const useStore = create(
         try {
           // Use same save logic as saveBoardsToDisk - includes localStorage fallback
           if (window.electronAPI?.saveBoards) {
-            console.log('[Store] Saving boards via Electron API after removeBoard:', { 
-              boardsCount: currentState.boards.length, 
-              activeBoardId: currentState.activeBoardId 
+            console.log('[Store] Saving boards via Electron API after removeBoard:', {
+              boardsCount: currentState.boards.length,
+              activeBoardId: currentState.activeBoardId,
             })
             window.electronAPI.saveBoards(currentState.boards, currentState.activeBoardId)
           } else {
             // Fallback to localStorage when Electron is not available
-            console.log('[Store] Saving boards to localStorage after removeBoard:', { 
-              boardsCount: currentState.boards.length, 
-              activeBoardId: currentState.activeBoardId 
-            })
-            localStorage.setItem('todo_boards', JSON.stringify({
-              boards: currentState.boards,
-              standaloneTasks: currentState.standaloneTasks,
+            console.log('[Store] Saving boards to localStorage after removeBoard:', {
+              boardsCount: currentState.boards.length,
               activeBoardId: currentState.activeBoardId,
-            }))
+            })
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
           }
         } catch (error) {
           console.error('[Store] Error in direct save after removeBoard:', error)
@@ -304,16 +334,19 @@ export const useStore = create(
         try {
           if (window.electronAPI?.saveBoards) {
             window.electronAPI.saveBoards(
-              currentState.boards, 
+              currentState.boards,
               currentState.activeBoardId,
-              currentState.standaloneTasks
+              currentState.standaloneTasks,
             )
           } else {
-            localStorage.setItem('todo_boards', JSON.stringify({ 
-              boards: currentState.boards,
-              standaloneTasks: currentState.standaloneTasks,
-              activeBoardId: currentState.activeBoardId 
-            }))
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
           }
         } catch (error) {
           console.error('[Store] Error in direct save after renameBoard:', error)
@@ -351,16 +384,19 @@ export const useStore = create(
         try {
           if (window.electronAPI?.saveBoards) {
             window.electronAPI.saveBoards(
-              currentState.boards, 
+              currentState.boards,
               currentState.activeBoardId,
-              currentState.standaloneTasks
+              currentState.standaloneTasks,
             )
           } else {
-            localStorage.setItem('todo_boards', JSON.stringify({ 
-              boards: currentState.boards,
-              standaloneTasks: currentState.standaloneTasks,
-              activeBoardId: currentState.activeBoardId 
-            }))
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
           }
         } catch (error) {
           console.error('[Store] Error in direct save after addColumn:', error)
@@ -402,16 +438,19 @@ export const useStore = create(
         try {
           if (window.electronAPI?.saveBoards) {
             window.electronAPI.saveBoards(
-              currentState.boards, 
+              currentState.boards,
               currentState.activeBoardId,
-              currentState.standaloneTasks
+              currentState.standaloneTasks,
             )
           } else {
-            localStorage.setItem('todo_boards', JSON.stringify({ 
-              boards: currentState.boards,
-              standaloneTasks: currentState.standaloneTasks,
-              activeBoardId: currentState.activeBoardId 
-            }))
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
           }
         } catch (error) {
           console.error('[Store] Error in direct save after renameColumn:', error)
@@ -435,6 +474,7 @@ export const useStore = create(
               ...payload.settings,
               status: payload.settings?.status || 'To Do',
             },
+            extendedData: { ...defaultExtendedData, ...(payload.extendedData || {}) },
             timeline: [createTimelineEntry('Created as standalone task')],
           }
           return {
@@ -467,6 +507,7 @@ export const useStore = create(
                     ...payload.settings,
                     status: column.title,
                   },
+                  extendedData: { ...defaultExtendedData, ...(payload.extendedData || {}) },
                   timeline: [createTimelineEntry(`Created in ${column.title}`)],
                 }
 
@@ -488,28 +529,31 @@ export const useStore = create(
         try {
           // Use same save logic as saveBoardsToDisk - includes localStorage fallback
           if (window.electronAPI?.saveBoards) {
-            console.log('[Store] Saving boards via Electron API after addTask:', { 
+            console.log('[Store] Saving boards via Electron API after addTask:', {
               boardsCount: currentState.boards.length,
               standaloneTasksCount: currentState.standaloneTasks.length,
-              activeBoardId: currentState.activeBoardId 
+              activeBoardId: currentState.activeBoardId,
             })
             window.electronAPI.saveBoards(
-              currentState.boards, 
+              currentState.boards,
               currentState.activeBoardId,
-              currentState.standaloneTasks
+              currentState.standaloneTasks,
             )
           } else {
             // Fallback to localStorage when Electron is not available
-            console.log('[Store] Saving boards to localStorage after addTask:', { 
+            console.log('[Store] Saving boards to localStorage after addTask:', {
               boardsCount: currentState.boards.length,
               standaloneTasksCount: currentState.standaloneTasks.length,
-              activeBoardId: currentState.activeBoardId 
+              activeBoardId: currentState.activeBoardId,
             })
-            localStorage.setItem('todo_boards', JSON.stringify({ 
-              boards: currentState.boards,
-              standaloneTasks: currentState.standaloneTasks,
-              activeBoardId: currentState.activeBoardId 
-            }))
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
           }
         } catch (error) {
           console.error('[Store] Error in direct save after addTask:', error)
@@ -622,27 +666,30 @@ export const useStore = create(
         try {
           // Use same save logic as saveBoardsToDisk - includes localStorage fallback
           if (window.electronAPI?.saveBoards) {
-            console.log('[Store] Saving boards via Electron API after removeTask:', { 
-              boardsCount: currentState.boards.length, 
-              activeBoardId: currentState.activeBoardId 
+            console.log('[Store] Saving boards via Electron API after removeTask:', {
+              boardsCount: currentState.boards.length,
+              activeBoardId: currentState.activeBoardId,
             })
             window.electronAPI.saveBoards(
-              currentState.boards, 
+              currentState.boards,
               currentState.activeBoardId,
-              currentState.standaloneTasks
+              currentState.standaloneTasks,
             )
           } else {
             // Fallback to localStorage when Electron is not available
-            console.log('[Store] Saving boards to localStorage after removeTask:', { 
+            console.log('[Store] Saving boards to localStorage after removeTask:', {
               boardsCount: currentState.boards.length,
               standaloneTasksCount: currentState.standaloneTasks.length,
-              activeBoardId: currentState.activeBoardId 
+              activeBoardId: currentState.activeBoardId,
             })
-            localStorage.setItem('todo_boards', JSON.stringify({ 
-              boards: currentState.boards,
-              standaloneTasks: currentState.standaloneTasks,
-              activeBoardId: currentState.activeBoardId 
-            }))
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
           }
         } catch (error) {
           console.error('[Store] Error in direct save after removeTask:', error)
@@ -666,6 +713,7 @@ export const useStore = create(
                 ...task,
                 ...updates,
                 settings: { ...task.settings, ...(updates.settings || {}) },
+                extendedData: { ...task.extendedData, ...(updates.extendedData || {}) },
                 timeline: [...task.timeline, createTimelineEntry(action)],
               }
             }),
@@ -698,6 +746,7 @@ export const useStore = create(
                       ...task,
                       ...updates,
                       settings: { ...task.settings, ...(updates.settings || {}) },
+                      extendedData: { ...task.extendedData, ...(updates.extendedData || {}) },
                       timeline: [...task.timeline, createTimelineEntry(action)],
                     }
                   }),
@@ -716,27 +765,30 @@ export const useStore = create(
         try {
           // Use same save logic as saveBoardsToDisk - includes localStorage fallback
           if (window.electronAPI?.saveBoards) {
-            console.log('[Store] Saving boards via Electron API after updateTask:', { 
-              boardsCount: currentState.boards.length, 
-              activeBoardId: currentState.activeBoardId 
+            console.log('[Store] Saving boards via Electron API after updateTask:', {
+              boardsCount: currentState.boards.length,
+              activeBoardId: currentState.activeBoardId,
             })
             window.electronAPI.saveBoards(
-              currentState.boards, 
+              currentState.boards,
               currentState.activeBoardId,
-              currentState.standaloneTasks
+              currentState.standaloneTasks,
             )
           } else {
             // Fallback to localStorage when Electron is not available
-            console.log('[Store] Saving boards to localStorage after updateTask:', { 
+            console.log('[Store] Saving boards to localStorage after updateTask:', {
               boardsCount: currentState.boards.length,
               standaloneTasksCount: currentState.standaloneTasks.length,
-              activeBoardId: currentState.activeBoardId 
+              activeBoardId: currentState.activeBoardId,
             })
-            localStorage.setItem('todo_boards', JSON.stringify({ 
-              boards: currentState.boards,
-              standaloneTasks: currentState.standaloneTasks,
-              activeBoardId: currentState.activeBoardId 
-            }))
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
           }
         } catch (error) {
           console.error('[Store] Error in direct save after updateTask:', error)
@@ -818,21 +870,24 @@ export const useStore = create(
         try {
           // Use same save logic as saveBoardsToDisk - includes localStorage fallback
           if (window.electronAPI?.saveBoards) {
-            console.log('[Store] Saving boards via Electron API after moveTask:', { 
-              boardsCount: currentState.boards.length, 
-              activeBoardId: currentState.activeBoardId 
+            console.log('[Store] Saving boards via Electron API after moveTask:', {
+              boardsCount: currentState.boards.length,
+              activeBoardId: currentState.activeBoardId,
             })
             window.electronAPI.saveBoards(currentState.boards, currentState.activeBoardId)
           } else {
             // Fallback to localStorage when Electron is not available
-            console.log('[Store] Saving boards to localStorage after moveTask:', { 
-              boardsCount: currentState.boards.length, 
-              activeBoardId: currentState.activeBoardId 
+            console.log('[Store] Saving boards to localStorage after moveTask:', {
+              boardsCount: currentState.boards.length,
+              activeBoardId: currentState.activeBoardId,
             })
-            localStorage.setItem('todo_boards', JSON.stringify({ 
-              boards: currentState.boards, 
-              activeBoardId: currentState.activeBoardId 
-            }))
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
           }
         } catch (error) {
           console.error('[Store] Error in direct save after moveTask:', error)
@@ -872,7 +927,14 @@ export const useStore = create(
           ...taskToMove,
           settings: {
             ...taskToMove.settings,
-            ...(isTargetStandalone ? {} : { status: state.boards.find((b) => b.id === targetBoardId)?.columns.find((c) => c.id === targetColumnId)?.title ?? 'To Do' }),
+            ...(isTargetStandalone
+              ? {}
+              : {
+                  status:
+                    state.boards
+                      .find((b) => b.id === targetBoardId)
+                      ?.columns.find((c) => c.id === targetColumnId)?.title ?? 'To Do',
+                }),
           },
           timeline: [...taskToMove.timeline, moveEntry],
         }
@@ -956,6 +1018,323 @@ export const useStore = create(
       return result
     },
 
+    updateTaskChecklist: (boardId, columnId, taskId, checklistId, updates) => {
+      const result = set((state) => {
+        const updateTaskFn = (task) => {
+          if (task.id !== taskId) return task
+          return {
+            ...task,
+            extendedData: {
+              ...task.extendedData,
+              checklists: task.extendedData.checklists.map((item) =>
+                item.id === checklistId ? { ...item, ...updates } : item,
+              ),
+            },
+          }
+        }
+
+        if (!boardId || !columnId) {
+          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
+        }
+
+        return {
+          boards: state.boards.map((board) => {
+            if (board.id !== boardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== columnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.map(updateTaskFn),
+                }
+              }),
+            }
+          }),
+        }
+      })
+
+      setTimeout(() => {
+        const currentState = useStore.getState()
+        if (!currentState.hydrationComplete) return
+        try {
+          if (window.electronAPI?.saveBoards) {
+            window.electronAPI.saveBoards(
+              currentState.boards,
+              currentState.activeBoardId,
+              currentState.standaloneTasks,
+            )
+          } else {
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
+          }
+        } catch (error) {
+          console.error('[Store] Error in direct save after updateTaskChecklist:', error)
+        }
+      }, 100)
+      return result
+    },
+
+    addTaskChecklistItem: (boardId, columnId, taskId) => {
+      const result = set((state) => {
+        const updateTaskFn = (task) => {
+          if (task.id !== taskId) return task
+          return {
+            ...task,
+            extendedData: {
+              ...task.extendedData,
+              checklists: [
+                ...task.extendedData.checklists,
+                { id: uuidv4(), text: '', completed: false },
+              ],
+            },
+          }
+        }
+
+        if (!boardId || !columnId) {
+          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
+        }
+
+        return {
+          boards: state.boards.map((board) => {
+            if (board.id !== boardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== columnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.map(updateTaskFn),
+                }
+              }),
+            }
+          }),
+        }
+      })
+
+      setTimeout(() => {
+        const currentState = useStore.getState()
+        if (!currentState.hydrationComplete) return
+        try {
+          if (window.electronAPI?.saveBoards) {
+            window.electronAPI.saveBoards(
+              currentState.boards,
+              currentState.activeBoardId,
+              currentState.standaloneTasks,
+            )
+          } else {
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
+          }
+        } catch (error) {
+          console.error('[Store] Error in direct save after addTaskChecklistItem:', error)
+        }
+      }, 100)
+      return result
+    },
+
+    removeTaskChecklistItem: (boardId, columnId, taskId, checklistId) => {
+      const result = set((state) => {
+        const updateTaskFn = (task) => {
+          if (task.id !== taskId) return task
+          return {
+            ...task,
+            extendedData: {
+              ...task.extendedData,
+              checklists: task.extendedData.checklists.filter((item) => item.id !== checklistId),
+            },
+          }
+        }
+
+        if (!boardId || !columnId) {
+          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
+        }
+
+        return {
+          boards: state.boards.map((board) => {
+            if (board.id !== boardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== columnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.map(updateTaskFn),
+                }
+              }),
+            }
+          }),
+        }
+      })
+
+      setTimeout(() => {
+        const currentState = useStore.getState()
+        if (!currentState.hydrationComplete) return
+        try {
+          if (window.electronAPI?.saveBoards) {
+            window.electronAPI.saveBoards(
+              currentState.boards,
+              currentState.activeBoardId,
+              currentState.standaloneTasks,
+            )
+          } else {
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
+          }
+        } catch (error) {
+          console.error('[Store] Error in direct save after removeTaskChecklistItem:', error)
+        }
+      }, 100)
+      return result
+    },
+
+    addTaskAttachment: (boardId, columnId, taskId, attachment) => {
+      const result = set((state) => {
+        const updateTaskFn = (task) => {
+          if (task.id !== taskId) return task
+          return {
+            ...task,
+            extendedData: {
+              ...task.extendedData,
+              attachments: [
+                ...task.extendedData.attachments,
+                {
+                  id: uuidv4(),
+                  createdAt: new Date().toISOString(),
+                  ...attachment,
+                },
+              ],
+            },
+          }
+        }
+
+        if (!boardId || !columnId) {
+          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
+        }
+
+        return {
+          boards: state.boards.map((board) => {
+            if (board.id !== boardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== columnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.map(updateTaskFn),
+                }
+              }),
+            }
+          }),
+        }
+      })
+
+      setTimeout(() => {
+        const currentState = useStore.getState()
+        if (!currentState.hydrationComplete) return
+        try {
+          if (window.electronAPI?.saveBoards) {
+            window.electronAPI.saveBoards(
+              currentState.boards,
+              currentState.activeBoardId,
+              currentState.standaloneTasks,
+            )
+          } else {
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
+          }
+        } catch (error) {
+          console.error('[Store] Error in direct save after addTaskAttachment:', error)
+        }
+      }, 100)
+      return result
+    },
+
+    removeTaskAttachment: (boardId, columnId, taskId, attachmentId) => {
+      const result = set((state) => {
+        const updateTaskFn = (task) => {
+          if (task.id !== taskId) return task
+          return {
+            ...task,
+            extendedData: {
+              ...task.extendedData,
+              attachments: task.extendedData.attachments.filter((a) => a.id !== attachmentId),
+            },
+          }
+        }
+
+        if (!boardId || !columnId) {
+          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
+        }
+
+        return {
+          boards: state.boards.map((board) => {
+            if (board.id !== boardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== columnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.map(updateTaskFn),
+                }
+              }),
+            }
+          }),
+        }
+      })
+
+      setTimeout(() => {
+        const currentState = useStore.getState()
+        if (!currentState.hydrationComplete) return
+        try {
+          if (window.electronAPI?.saveBoards) {
+            window.electronAPI.saveBoards(
+              currentState.boards,
+              currentState.activeBoardId,
+              currentState.standaloneTasks,
+            )
+          } else {
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
+          }
+        } catch (error) {
+          console.error('[Store] Error in direct save after removeTaskAttachment:', error)
+        }
+      }, 100)
+      return result
+    },
+
     openTaskDetail: (boardId, columnId, taskId) =>
       set({
         selectedTask: { boardId, columnId, taskId },
@@ -971,7 +1350,7 @@ export const attachBoardPersistence = () => {
   }
 
   persistenceAttached = true
-  
+
   // Helper function to save boards (Electron SQLite or localStorage fallback)
   const saveBoardsToDisk = () => {
     try {
@@ -982,24 +1361,27 @@ export const attachBoardPersistence = () => {
       }
       const activeBoardId = state.activeBoardId
       if (window.electronAPI?.saveBoards) {
-        console.log('[Store] saveBoardsToDisk: Saving via Electron API:', { 
+        console.log('[Store] saveBoardsToDisk: Saving via Electron API:', {
           boardsCount: state.boards.length,
           standaloneTasksCount: state.standaloneTasks.length,
-          activeBoardId 
+          activeBoardId,
         })
         window.electronAPI.saveBoards(state.boards, activeBoardId, state.standaloneTasks)
       } else {
         try {
-          console.log('[Store] saveBoardsToDisk: Saving to localStorage:', { 
+          console.log('[Store] saveBoardsToDisk: Saving to localStorage:', {
             boardsCount: state.boards.length,
             standaloneTasksCount: state.standaloneTasks.length,
-            activeBoardId 
+            activeBoardId,
           })
-          localStorage.setItem('todo_boards', JSON.stringify({ 
-            boards: state.boards, 
-            standaloneTasks: state.standaloneTasks,
-            activeBoardId 
-          }))
+          localStorage.setItem(
+            'todo_boards',
+            JSON.stringify({
+              boards: state.boards,
+              standaloneTasks: state.standaloneTasks,
+              activeBoardId,
+            }),
+          )
         } catch (e) {
           console.error('[Store] localStorage save failed:', e)
           return false
@@ -1011,7 +1393,7 @@ export const attachBoardPersistence = () => {
       return false
     }
   }
-  
+
   // Sync activeBoardId to uiSettings.activeBoardId and save whenever it changes
   useStore.subscribe(
     (state) => state.activeBoardId,
@@ -1036,7 +1418,7 @@ export const attachBoardPersistence = () => {
       saveBoardsToDisk()
     },
   )
-  
+
   // Only persist after hydration is complete to avoid overwriting loaded data
   // Skip the first emission which happens when subscription is attached (during hydration)
   useStore.subscribe(
@@ -1053,7 +1435,7 @@ export const attachBoardPersistence = () => {
       saveBoardsToDisk()
     },
   )
-  
+
   // Also persist when standaloneTasks change
   let standaloneTasksFirstEmit = true
   useStore.subscribe(
@@ -1069,7 +1451,7 @@ export const attachBoardPersistence = () => {
       saveBoardsToDisk()
     },
   )
-  
+
   useStore.subscribe(
     (state) => state.deletedTasks,
     (deletedTasks) => {
@@ -1091,7 +1473,7 @@ export const attachBoardPersistence = () => {
       }
     },
   )
-  
+
   useStore.subscribe(
     (state) => state.uiSettings,
     (uiSettings) => {
@@ -1114,4 +1496,3 @@ export const attachBoardPersistence = () => {
     },
   )
 }
-

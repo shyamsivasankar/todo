@@ -29,12 +29,32 @@ export function getAllTasksWithContext(boards, standaloneTasks) {
   return items
 }
 
-/** Parse YYYY-MM-DD or ISO string to date-only string YYYY-MM-DD */
-export function toDateKey(str) {
-  if (!str || typeof str !== 'string') return null
-  const d = new Date(str)
+/** Parse YYYY-MM-DD, ISO string, or Date object to local date-only string YYYY-MM-DD */
+export function toDateKey(date) {
+  if (!date) return null
+
+  // If it's already a YYYY-MM-DD string, return it directly to avoid timezone shifts
+  if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return date
+  }
+
+  const d = date instanceof Date ? date : new Date(date)
   if (Number.isNaN(d.getTime())) return null
-  return d.toISOString().slice(0, 10)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+/** Parse YYYY-MM-DD string to local Date object */
+export function parseDateKey(key) {
+  if (!key || typeof key !== 'string') return null
+  const parts = key.split('-')
+  if (parts.length !== 3) return null
+  const year = parseInt(parts[0], 10)
+  const month = parseInt(parts[1], 10) - 1
+  const day = parseInt(parts[2], 10)
+  return new Date(year, month, day)
 }
 
 /** Tasks that have a due date, for calendar and deadlines list */
@@ -75,14 +95,14 @@ export function getTasksForGantt(items, priorityFilter = null) {
     .map((item) => {
       const created = toDateKey(item.task.createdAt)
       const due = toDateKey(item.task.settings?.dueDate)
-      const start = created || due || toDateKey(new Date().toISOString())
+      const start = created || due || toDateKey(new Date())
       const end = due || start
       return {
         ...item,
         startKey: start,
         endKey: end,
-        startDate: new Date(start),
-        endDate: new Date(end),
+        startDate: parseDateKey(start),
+        endDate: parseDateKey(end),
       }
     })
     .filter((item) => item.startKey && item.endKey)
@@ -181,15 +201,72 @@ export function formatDayShort(d) {
 
 /** Check if date key is today */
 export function isTodayKey(key) {
-  return key === toDateKey(new Date().toISOString())
+  return key === toDateKey(new Date())
 }
 
 /** Days remaining until due (or overdue) */
 export function getDaysRemaining(dueDateKey) {
-  const today = toDateKey(new Date().toISOString())
+  const today = toDateKey(new Date())
   if (!dueDateKey) return null
-  const a = new Date(today)
-  const b = new Date(dueDateKey)
-  const diff = Math.ceil((b - a) / 86400000)
+  const a = parseDateKey(today)
+  const b = parseDateKey(dueDateKey)
+  const diff = Math.round((b - a) / 86400000)
   return diff
+}
+
+/**
+ * Greedy packing algorithm for Gantt lanes.
+ * 1. Sort tasks by startDate.
+ * 2. Assign each task to the first available lane where task.startDate > lane[lastTask].endDate.
+ * 3. Return { lanes, totalLanes, tasksWithLane }.
+ */
+export function calculateGanttLanes(tasks) {
+  if (!tasks || tasks.length === 0) {
+    return { lanes: [], totalLanes: 0, tasksWithLane: [] }
+  }
+
+  // Sort by startDate, then by endDate (shorter tasks first if same start)
+  const sortedTasks = [...tasks].sort((a, b) => {
+    const startDiff = a.startDate.getTime() - b.startDate.getTime()
+    if (startDiff !== 0) return startDiff
+    return a.endDate.getTime() - b.endDate.getTime()
+  })
+
+  const lanes = [] // Array of arrays, each sub-array is a lane containing tasks
+  const tasksWithLane = []
+
+  for (const task of sortedTasks) {
+    let assignedLaneIndex = -1
+
+    for (let i = 0; i < lanes.length; i++) {
+      const lane = lanes[i]
+      const lastTaskInLane = lane[lane.length - 1]
+
+      // Check if task starts after the last task in this lane ends
+      if (task.startDate.getTime() > lastTaskInLane.endDate.getTime()) {
+        assignedLaneIndex = i
+        break
+      }
+    }
+
+    const taskWithLane = {
+      ...task,
+      laneIndex: assignedLaneIndex === -1 ? lanes.length : assignedLaneIndex,
+    }
+
+    if (assignedLaneIndex === -1) {
+      // Create a new lane
+      lanes.push([taskWithLane])
+    } else {
+      lanes[assignedLaneIndex].push(taskWithLane)
+    }
+
+    tasksWithLane.push(taskWithLane)
+  }
+
+  return {
+    lanes,
+    totalLanes: lanes.length,
+    tasksWithLane,
+  }
 }

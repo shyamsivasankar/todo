@@ -10,6 +10,9 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useStore } from '../../../store/useStore'
+import MarkdownDescription from './MarkdownDescription'
+import TaskChecklist from './TaskChecklist'
+import TaskAttachments from './TaskAttachments'
 
 const priorityOptions = ['low', 'medium', 'high']
 const priorityDisplay = {
@@ -222,15 +225,19 @@ export default function TaskDetailPanel({ taskItem, onClose }) {
 
         {/* Notes / Description */}
         <div className="mb-8">
-          <label className="block text-xs font-bold text-text-muted uppercase tracking-widest mb-3">
-            Notes
-          </label>
-          <textarea
+          <MarkdownDescription
             value={formState.description}
-            onChange={(e) => handleFieldChange('description', e.target.value)}
-            rows={8}
-            placeholder="Add notes here..."
-            className="w-full resize-none text-sm text-text-secondary leading-relaxed font-light bg-transparent border-none outline-none p-0 placeholder:text-text-muted/50"
+            onChange={(val) => handleFieldChange('description', val)}
+          />
+        </div>
+
+        {/* Checklist */}
+        <div className="mb-8">
+          <TaskChecklist
+            boardId={boardId}
+            columnId={columnId}
+            taskId={task.id}
+            checklists={task.extendedData?.checklists || []}
           />
         </div>
 
@@ -257,6 +264,16 @@ export default function TaskDetailPanel({ taskItem, onClose }) {
             onChange={(e) => handleFieldChange('tags', e.target.value)}
             placeholder="tag1, tag2, tag3"
             className="w-full text-sm text-text-secondary bg-transparent border border-border rounded-lg px-3 py-2 outline-none focus:border-primary placeholder:text-text-muted/50"
+          />
+        </div>
+
+        {/* Attachments */}
+        <div className="mb-8">
+          <TaskAttachments
+            boardId={boardId}
+            columnId={columnId}
+            taskId={task.id}
+            attachments={task.extendedData?.attachments || []}
           />
         </div>
 

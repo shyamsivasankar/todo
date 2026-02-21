@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, shell, dialog } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { boardOperations, deletedTasksOperations, settingsOperations } from './database.js'
@@ -22,7 +22,7 @@ const createWindow = () => {
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: true,
-      devTools: true, // Explicitly enable DevTools
+      devTools: isDev, // Only enable DevTools in development
     },
   })
 
@@ -163,6 +163,55 @@ app.whenReady().then(() => {
   // Save settings
   ipcMain.on('settings:set', (_event, settings) => {
     settingsOperations.saveAll(settings)
+  })
+
+  // Open a local file or folder
+  ipcMain.handle('file:open', async (_event, filePath) => {
+    console.log('[IPC] Opening file/path:', filePath)
+    if (!filePath) return { success: false, error: 'No path provided' }
+    
+    // Security check: only allow absolute paths
+    if (!path.isAbsolute(filePath)) {
+      return { success: false, error: 'Only absolute paths are allowed' }
+    }
+
+    try {
+      const error = await shell.openPath(filePath)
+      if (error) {
+        console.error('[IPC] Error opening path:', error)
+        return { success: false, error }
+      }
+      return { success: true }
+    } catch (err) {
+      console.error('[IPC] Exception opening path:', err)
+      return { success: false, error: err.message }
+    }
+  })
+
+  // Browse for a file or folder
+  ipcMain.handle('file:browse', async (_event, options = {}) => {
+    console.log('[IPC] Browsing for file/folder with options:', options)
+    
+    // Whitelist properties for security
+    const allowedProperties = ['openFile', 'openDirectory', 'multiSelections', 'showHiddenFiles']
+    const safeProperties = (options.properties || []).filter(p => allowedProperties.includes(p))
+    
+    try {
+      const result = await dialog.showOpenDialog({
+        properties: safeProperties.length > 0 ? safeProperties : ['openFile', 'openDirectory'],
+        title: options.title || 'Select File or Folder',
+        buttonLabel: options.buttonLabel || 'Select',
+      })
+      
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, canceled: true }
+      }
+      
+      return { success: true, filePaths: result.filePaths }
+    } catch (err) {
+      console.error('[IPC] Exception browsing for file:', err)
+      return { success: false, error: err.message }
+    }
   })
 
   createWindow()

@@ -12,6 +12,7 @@ import {
   groupByDueDate,
   getMonthGrid,
   toDateKey,
+  parseDateKey,
   isTodayKey,
   getDaysRemaining,
 } from '../utils/calendarTasks'
@@ -32,7 +33,7 @@ export default function CalendarTimelineView({ onCreateTask, priorityFilter = nu
 
   const [calendarDate, setCalendarDate] = useState(() => new Date())
   const [selectedDateKey, setSelectedDateKey] = useState(() =>
-    toDateKey(new Date().toISOString()),
+    toDateKey(new Date()),
   )
 
   const items = useMemo(
@@ -52,7 +53,7 @@ export default function CalendarTimelineView({ onCreateTask, priorityFilter = nu
   )
 
   const upcomingList = useMemo(() => {
-    const todayKey = toDateKey(new Date().toISOString())
+    const todayKey = toDateKey(new Date())
     return withDue.filter((item) => item.task.settings?.dueDate >= todayKey).slice(0, 20)
   }, [withDue])
 
@@ -82,7 +83,7 @@ export default function CalendarTimelineView({ onCreateTask, priorityFilter = nu
   const jumpToToday = () => {
     const now = new Date()
     setCalendarDate(now)
-    setSelectedDateKey(toDateKey(now.toISOString()))
+    setSelectedDateKey(toDateKey(now))
   }
 
   return (
@@ -223,7 +224,7 @@ export default function CalendarTimelineView({ onCreateTask, priorityFilter = nu
                   grouped.set(key, [])
                 grouped.get(key).push(item)
               }
-              const todayKey = toDateKey(new Date().toISOString())
+              const todayKey = toDateKey(new Date())
               const entries = Array.from(grouped.entries()).sort((a, b) =>
                 a[0].localeCompare(b[0]),
               )
@@ -231,7 +232,7 @@ export default function CalendarTimelineView({ onCreateTask, priorityFilter = nu
                 const isToday = dateKey === todayKey
                 const label = isToday
                   ? 'Today'
-                  : new Date(dateKey).toLocaleDateString('en-US', {
+                  : parseDateKey(dateKey).toLocaleDateString('en-US', {
                       month: 'short',
                       day: 'numeric',
                     })
