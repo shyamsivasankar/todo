@@ -61,6 +61,9 @@ Desktop.ini
 # Cursor IDE (may contain API keys)
 .cursor/
 
+# Maestro / Gemini CLI state
+.gemini/
+
 # Test coverage
 coverage/
 .nyc_output/
@@ -79,14 +82,16 @@ coverage/
 *.swo
 *~
 
-# SQLite database files (optional - uncomment if you don't want to commit DB)
-# *.db
-# *.sqlite
-# *.sqlite3
+# SQLite database files
+*.db
+*.sqlite
+*.sqlite3
+db-test/
 
 # Package lock files (keep one, ignore others)
-# yarn.lock
-# pnpm-lock.yaml
+yarn.lock
+pnpm-lock.yaml
+pnpm-workspace.yaml
 
 # Debug files
 lib-cov/

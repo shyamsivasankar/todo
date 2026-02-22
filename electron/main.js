@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, shell, dialog } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
-import { boardOperations, deletedTasksOperations, settingsOperations } from './database.js'
+import { boardOperations, deletedTasksOperations, settingsOperations, taskOperations } from './database.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -226,6 +226,91 @@ app.whenReady().then(() => {
       deletedTasksOperations.saveAll(validatedDeletedTasks)
     } catch (error) {
       console.error("[IPC] Error in deletedTasks:set:", error)
+    }
+  })
+
+  // Get settings
+  ipcMain.handle('settings:get', () => {
+    console.log('[IPC] Getting settings from database...')
+    return settingsOperations.getAll()
+  })
+
+  // Save settings
+  ipcMain.on('settings:set', (_event, settings) => {
+    try {
+      const validatedSettings = SettingsSchema.parse(settings)
+      console.log('[IPC] Saving settings to database:', validatedSettings)
+      settingsOperations.saveAll(validatedSettings)
+      console.log('[IPC] Settings saved successfully')
+    } catch (error) {
+      console.error('[IPC] Error in settings:set:', error)
+    }
+  })
+
+  // Task operations
+  const CreateTaskSchema = z.object({
+    board_id: z.string().nullable().optional(),
+    column_id: z.string().nullable().optional(),
+    isStandalone: z.boolean().optional(),
+    heading: z.string(),
+    tldr: z.string().optional(),
+    description: z.string().optional(),
+    priority: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    extended_data: z.object({}).passthrough().optional(),
+    due_date: z.string().optional(),
+    status: z.string(),
+    position: z.number(),
+    created_at: z.string(),
+    id: z.string(),
+  })
+  ipcMain.handle('task:create', (_event, taskData) => {
+    try {
+      const validatedTask = CreateTaskSchema.parse(taskData)
+      if (validatedTask.isStandalone) {
+        validatedTask.board_id = null
+        validatedTask.column_id = null
+      }
+      return taskOperations.create(validatedTask)
+    } catch (error) {
+      console.error('[IPC] Error in task:create:', error)
+    }
+  })
+
+  const UpdateTaskSchema = z.object({}).passthrough()
+  ipcMain.on('task:update', (_event, { taskId, updates }) => {
+    try {
+      const validatedUpdates = UpdateTaskSchema.parse(updates)
+      taskOperations.update(taskId, validatedUpdates)
+    } catch (error) {
+      console.error('[IPC] Error in task:update:', error)
+    }
+  })
+
+  ipcMain.on('task:delete', (_event, taskId) => {
+    try {
+      taskOperations.delete(taskId)
+    } catch (error) {
+      console.error('[IPC] Error in task:delete:', error)
+    }
+  })
+
+  const MoveTaskSchema = z.object({
+    taskId: z.string(),
+    newBoardId: z.string().nullable().optional(),
+    newColumnId: z.string().nullable().optional(),
+    newPosition: z.number(),
+    isStandalone: z.boolean().optional(),
+  })
+  ipcMain.on('task:move', (_event, args) => {
+    try {
+      const validatedArgs = MoveTaskSchema.parse(args)
+      const { taskId, newBoardId, newColumnId, newPosition, isStandalone } = validatedArgs
+      const boardId = isStandalone ? null : newBoardId
+      const columnId = isStandalone ? null : newColumnId
+      taskOperations.move(taskId, boardId, columnId, newPosition)
+    } catch (error) {
+      console.error('[IPC] Error in task:move:', error)
     }
   })
 
