@@ -1,11 +1,76 @@
 import { app, BrowserWindow, ipcMain, Menu, shell, dialog } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { z } from 'zod'
 import { boardOperations, deletedTasksOperations, settingsOperations } from './database.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const isDev = !app.isPackaged
+
+// IPC Validation Schemas
+const TaskSchema = z.object({
+  id: z.string(),
+  heading: z.string(),
+  tldr: z.string().optional().nullable(),
+  description: z.string().optional().nullable(),
+  createdAt: z.string().optional().nullable(),
+  settings: z.object({
+    priority: z.string().optional().nullable(),
+    tags: z.array(z.string()).optional().nullable(),
+    dueDate: z.string().optional().nullable(),
+    status: z.string().optional().nullable(),
+  }).optional().nullable(),
+  extendedData: z.object({
+    checklists: z.array(z.any()).optional().nullable(),
+    attachments: z.array(z.any()).optional().nullable(),
+  }).optional().nullable(),
+  timeline: z.array(z.object({
+    timestamp: z.string(),
+    action: z.string(),
+  })).optional().nullable(),
+})
+
+const ColumnSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  tasks: z.array(TaskSchema),
+})
+
+const BoardSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.string().optional().nullable(),
+  columns: z.array(ColumnSchema),
+})
+
+const BoardsDataSchema = z.union([
+  z.array(BoardSchema),
+  z.object({
+    boards: z.array(BoardSchema),
+    activeBoardId: z.string().nullable().optional(),
+    standaloneTasks: z.array(TaskSchema).optional().nullable(),
+  })
+])
+
+const DeletedTaskSchema = z.object({
+  boardId: z.string(),
+  boardName: z.string(),
+  columnId: z.string(),
+  columnTitle: z.string(),
+  task: TaskSchema,
+  deletedAt: z.string(),
+})
+
+const SettingsSchema = z.record(z.any())
+
+const FileOpenSchema = z.string()
+
+const FileBrowseSchema = z.object({
+  properties: z.array(z.string()).optional(),
+  title: z.string().optional(),
+  buttonLabel: z.string().optional(),
+})
 
 const createWindow = () => {
   const preloadPath = path.join(__dirname, 'preload.js')
@@ -128,10 +193,13 @@ app.whenReady().then(() => {
   // Save boards and active board ID
   ipcMain.on('boards:set', (_event, data) => {
     try {
+      // Validate data with Zod
+      const validatedData = BoardsDataSchema.parse(data)
+      
       // Handle both object format { boards, activeBoardId, standaloneTasks } and array format
-      const boards = Array.isArray(data) ? data : (data?.boards || [])
-      const activeBoardId = Array.isArray(data) ? null : (data?.activeBoardId || null)
-      const standaloneTasks = Array.isArray(data) ? [] : (data?.standaloneTasks || [])
+      const boards = Array.isArray(validatedData) ? validatedData : (validatedData?.boards || [])
+      const activeBoardId = Array.isArray(validatedData) ? null : (validatedData?.activeBoardId || null)
+      const standaloneTasks = Array.isArray(validatedData) ? [] : (validatedData?.standaloneTasks || [])
       
       console.log('[IPC] Saving boards:', { 
         boardsCount: boards.length, 
@@ -151,56 +219,106 @@ app.whenReady().then(() => {
   })
 
   // Save deleted tasks
-  ipcMain.on('deletedTasks:set', (_event, deletedTasks) => {
-    deletedTasksOperations.saveAll(deletedTasks)
+  // Save deleted tasks
+  ipcMain.on("deletedTasks:set", (_event, deletedTasks) => {
+    try {
+      const validatedDeletedTasks = z.array(DeletedTaskSchema).parse(deletedTasks)
+      deletedTasksOperations.saveAll(validatedDeletedTasks)
+    } catch (error) {
+      console.error("[IPC] Error in deletedTasks:set:", error)
+    }
   })
 
-  // Get settings
-  ipcMain.handle('settings:get', () => {
-    return settingsOperations.getAll()
-  })
+  /**
+   * Validates if a path is within a set of whitelisted directories.
+   */
+  const isPathWhitelisted = (filePath) => {
+    try {
+      const normalizedPath = path.normalize(filePath)
+      const whitelistedDirectories = [
+        app.getPath("home"),
+        app.getPath("desktop"),
+        app.getPath("documents"),
+        app.getPath("downloads"),
+        app.getPath("pictures"),
+        app.getPath("music"),
+        app.getPath("videos"),
+        app.getPath("userData"),
+        app.getPath("temp"),
+      ].filter(Boolean)
 
-  // Save settings
-  ipcMain.on('settings:set', (_event, settings) => {
-    settingsOperations.saveAll(settings)
-  })
+      return whitelistedDirectories.some(allowedPath => {
+        const normalizedAllowedPath = path.normalize(allowedPath)
+        const relative = path.relative(normalizedAllowedPath, normalizedPath)
+        return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))
+      })
+    } catch (error) {
+      console.error("[Security] Error validating path whitelist:", error)
+      return false
+    }
+  }
 
   // Open a local file or folder
-  ipcMain.handle('file:open', async (_event, filePath) => {
-    console.log('[IPC] Opening file/path:', filePath)
-    if (!filePath) return { success: false, error: 'No path provided' }
-    
-    // Security check: only allow absolute paths
-    if (!path.isAbsolute(filePath)) {
-      return { success: false, error: 'Only absolute paths are allowed' }
-    }
-
+  ipcMain.handle("file:open", async (event, filePath) => {
     try {
-      const error = await shell.openPath(filePath)
+      const validatedPath = FileOpenSchema.parse(filePath)
+      console.log("[IPC] Opening file/path:", validatedPath)
+      
+      if (!validatedPath) return { success: false, error: "No path provided" }
+      
+      // Security check: only allow absolute paths
+      if (!path.isAbsolute(validatedPath)) {
+        return { success: false, error: "Only absolute paths are allowed" }
+      }
+
+      // Whitelist validation
+      if (!isPathWhitelisted(validatedPath)) {
+        console.warn("[Security] Blocked attempt to open non-whitelisted path:", validatedPath)
+        return { success: false, error: "Access denied: Path is not in a whitelisted directory" }
+      }
+
+      // User consent
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const { response } = await dialog.showMessageBox(win, {
+        type: "question",
+        buttons: ["Cancel", "Open"],
+        defaultId: 1,
+        cancelId: 0,
+        title: "Security Confirmation",
+        message: "Do you want to open this file?",
+        detail: `Path: ${validatedPath}\n\nOnly open files from sources you trust.`,
+        noLink: true
+      })
+
+      if (response !== 1) {
+        return { success: false, error: "User cancelled" }
+      }
+
+      const error = await shell.openPath(validatedPath)
       if (error) {
-        console.error('[IPC] Error opening path:', error)
+        console.error("[IPC] Error opening path:", error)
         return { success: false, error }
       }
       return { success: true }
     } catch (err) {
-      console.error('[IPC] Exception opening path:', err)
+      console.error("[IPC] Exception opening path:", err)
       return { success: false, error: err.message }
     }
   })
-
   // Browse for a file or folder
   ipcMain.handle('file:browse', async (_event, options = {}) => {
-    console.log('[IPC] Browsing for file/folder with options:', options)
-    
-    // Whitelist properties for security
-    const allowedProperties = ['openFile', 'openDirectory', 'multiSelections', 'showHiddenFiles']
-    const safeProperties = (options.properties || []).filter(p => allowedProperties.includes(p))
-    
     try {
+      const validatedOptions = FileBrowseSchema.parse(options)
+      console.log('[IPC] Browsing for file/folder with options:', validatedOptions)
+      
+      // Whitelist properties for security
+      const allowedProperties = ['openFile', 'openDirectory', 'multiSelections', 'showHiddenFiles']
+      const safeProperties = (validatedOptions.properties || []).filter(p => allowedProperties.includes(p))
+      
       const result = await dialog.showOpenDialog({
         properties: safeProperties.length > 0 ? safeProperties : ['openFile', 'openDirectory'],
-        title: options.title || 'Select File or Folder',
-        buttonLabel: options.buttonLabel || 'Select',
+        title: validatedOptions.title || 'Select File or Folder',
+        buttonLabel: validatedOptions.buttonLabel || 'Select',
       })
       
       if (result.canceled || result.filePaths.length === 0) {
