@@ -33,6 +33,7 @@ const defaultTaskSettings = {
 const defaultExtendedData = {
   checklists: [],
   attachments: [],
+  comments: [],
 }
 
 const defaultUiSettings = {
@@ -817,6 +818,12 @@ export const useStore = create(
                       : copy.length
 
                   copy.splice(insertAt, 0, taskWithTimeline)
+                  
+                  // Sync with native backend if available
+                  if (window.electronAPI?.moveTask) {
+                    window.electronAPI.moveTask(taskId, boardId, targetColumnId, insertAt)
+                  }
+
                   return {
                     ...column,
                     tasks: copy,
@@ -829,11 +836,6 @@ export const useStore = create(
           }),
         }
       })
-
-      if (window.electronAPI?.moveTask) {
-        // The store's moveTask is only for moving between columns on the same board.
-        window.electronAPI.moveTask(taskId, boardId, targetColumnId, targetIndex)
-      }
 
       return result
     },
@@ -1272,6 +1274,137 @@ export const useStore = create(
           }
         } catch (error) {
           console.error('[Store] Error in direct save after removeTaskAttachment:', error)
+        }
+      }, 100)
+      return result
+    },
+
+    addTaskComment: (boardId, columnId, taskId, text) => {
+      if (!text?.trim()) return
+
+      const result = set((state) => {
+        const updateTaskFn = (task) => {
+          if (task.id !== taskId) return task
+          return {
+            ...task,
+            extendedData: {
+              ...task.extendedData,
+              comments: [
+                ...(task.extendedData.comments || []),
+                {
+                  id: uuidv4(),
+                  text: text.trim(),
+                  createdAt: new Date().toISOString(),
+                },
+              ],
+            },
+          }
+        }
+
+        if (!boardId || !columnId) {
+          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
+        }
+
+        return {
+          boards: state.boards.map((board) => {
+            if (board.id !== boardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== columnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.map(updateTaskFn),
+                }
+              }),
+            }
+          }),
+        }
+      })
+
+      setTimeout(() => {
+        const currentState = useStore.getState()
+        if (!currentState.hydrationComplete) return
+        try {
+          if (window.electronAPI?.saveBoards) {
+            window.electronAPI.saveBoards(
+              currentState.boards,
+              currentState.activeBoardId,
+              currentState.standaloneTasks,
+            )
+          } else {
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
+          }
+        } catch (error) {
+          console.error('[Store] Error in direct save after addTaskComment:', error)
+        }
+      }, 100)
+      return result
+    },
+
+    removeTaskComment: (boardId, columnId, taskId, commentId) => {
+      const result = set((state) => {
+        const updateTaskFn = (task) => {
+          if (task.id !== taskId) return task
+          return {
+            ...task,
+            extendedData: {
+              ...task.extendedData,
+              comments: (task.extendedData.comments || []).filter((c) => c.id !== commentId),
+            },
+          }
+        }
+
+        if (!boardId || !columnId) {
+          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
+        }
+
+        return {
+          boards: state.boards.map((board) => {
+            if (board.id !== boardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== columnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.map(updateTaskFn),
+                }
+              }),
+            }
+          }),
+        }
+      })
+
+      setTimeout(() => {
+        const currentState = useStore.getState()
+        if (!currentState.hydrationComplete) return
+        try {
+          if (window.electronAPI?.saveBoards) {
+            window.electronAPI.saveBoards(
+              currentState.boards,
+              currentState.activeBoardId,
+              currentState.standaloneTasks,
+            )
+          } else {
+            localStorage.setItem(
+              'todo_boards',
+              JSON.stringify({
+                boards: currentState.boards,
+                standaloneTasks: currentState.standaloneTasks,
+                activeBoardId: currentState.activeBoardId,
+              }),
+            )
+          }
+        } catch (error) {
+          console.error('[Store] Error in direct save after removeTaskComment:', error)
         }
       }, 100)
       return result

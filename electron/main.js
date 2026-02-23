@@ -24,7 +24,8 @@ const TaskSchema = z.object({
   extendedData: z.object({
     checklists: z.array(z.any()).optional().nullable(),
     attachments: z.array(z.any()).optional().nullable(),
-  }).optional().nullable(),
+    comments: z.array(z.any()).optional().nullable(),
+  }).passthrough().optional().nullable(),
   timeline: z.array(z.object({
     timestamp: z.string(),
     action: z.string(),

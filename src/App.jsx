@@ -1,10 +1,11 @@
-import { DndContext, PointerSensor, closestCorners, useSensor, useSensors } from '@dnd-kit/core'
+import { DndContext, DragOverlay, PointerSensor, closestCorners, useSensor, useSensors } from '@dnd-kit/core'
 import { ChevronDown, ChevronUp, Filter, Plus, Search, SortAsc } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import BoardCarousel from './features/boards/components/BoardCarousel'
 import AppSidebar from './features/layout/components/AppSidebar'
 import LoadingFallback from './components/LoadingFallback'
 import { attachBoardPersistence, useStore } from './store/useStore'
+import TaskCard from './features/tasks/components/TaskCard'
 
 // Lazy-loaded views
 const KanbanBoard = lazy(() => import('./features/boards/components/KanbanBoard'))
@@ -30,7 +31,9 @@ function App() {
   const hydrateSettings = useStore((state) => state.hydrateSettings)
   const hydrationComplete = useStore((state) => state.hydrationComplete)
   const moveTask = useStore((state) => state.moveTask)
+  const openTaskDetail = useStore((state) => state.openTaskDetail)
   const selectedTask = useStore((state) => state.selectedTask)
+  const standaloneTasks = useStore((state) => state.standaloneTasks)
 
   const [activeView, setActiveView] = useState('boards')
   const [boardModalOpen, setBoardModalOpen] = useState(false)
@@ -48,6 +51,7 @@ function App() {
   const [boardTaskSort, setBoardTaskSort] = useState({ by: 'none', dir: 'asc' })
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false)
   const [sortDropdownOpen, setSortDropdownOpen] = useState(false)
+  const [activeId, setActiveId] = useState(null)
   const filterDropdownRef = useRef(null)
   const sortDropdownRef = useRef(null)
   const hasLoadedRef = useRef(false)
@@ -69,6 +73,19 @@ function App() {
     () => boards.find((board) => board.id === activeBoardId) || null,
     [boards, activeBoardId],
   )
+
+  const activeTask = useMemo(() => {
+    if (!activeId) return null
+    for (const b of boards) {
+      for (const col of b.columns) {
+        const t = col.tasks.find((task) => task.id === activeId)
+        if (t) return { task: t, boardId: b.id, columnId: col.id }
+      }
+    }
+    const t = standaloneTasks.find((task) => task.id === activeId)
+    if (t) return { task: t, boardId: null, columnId: null }
+    return null
+  }, [activeId, boards, standaloneTasks])
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -189,7 +206,12 @@ function App() {
     }
   }, [uiSettings.startView])
 
+  const onDragStart = ({ active }) => {
+    setActiveId(active.id)
+  }
+
   const onDragEnd = ({ active, over }) => {
+    setActiveId(null)
     if (!over) return
     const sourceData = active.data.current
     const targetData = over.data.current
@@ -390,7 +412,12 @@ function App() {
               {!hydrationComplete ? (
                 <LoadingFallback message="Loading workspace..." />
               ) : (
-                <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
+                <DndContext 
+                  sensors={sensors} 
+                  collisionDetection={closestCorners} 
+                  onDragStart={onDragStart}
+                  onDragEnd={onDragEnd}
+                >
                   <Suspense fallback={<LoadingFallback message="Loading board..." />}>
                     <KanbanBoard
                       board={activeBoard}
@@ -400,6 +427,19 @@ function App() {
                       sort={boardTaskSort}
                     />
                   </Suspense>
+                  <DragOverlay adjustScale={false}>
+                    {activeId && activeTask ? (
+                      <div className="z-[100] w-[274px] pointer-events-none shadow-2xl ring-2 ring-primary/50 rounded-lg overflow-hidden transition-none">
+                        <TaskCard
+                          task={activeTask.task}
+                          boardId={activeTask.boardId}
+                          columnId={activeTask.columnId}
+                          isOverlay={true}
+                          onOpen={() => openTaskDetail(activeTask.boardId, activeTask.columnId, activeTask.task.id)}
+                        />
+                      </div>
+                    ) : null}
+                  </DragOverlay>
                 </DndContext>
               )}
             </div>

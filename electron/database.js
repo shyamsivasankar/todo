@@ -129,6 +129,17 @@ export function initializeSchema() {
     )
   `)
 
+  // Comments table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS task_comments (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )
+  `)
+
   // Task timeline table
   db.exec(`
     CREATE TABLE IF NOT EXISTS task_timeline (
@@ -170,6 +181,7 @@ export function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_task_timeline_task_id ON task_timeline(task_id);
     CREATE INDEX IF NOT EXISTS idx_checklists_task_id ON checklists(task_id);
     CREATE INDEX IF NOT EXISTS idx_attachments_task_id ON attachments(task_id);
+    CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id);
   `)
 }
 
@@ -193,15 +205,38 @@ export const boardOperations = {
       const timeline = db.prepare('SELECT * FROM task_timeline ORDER BY task_id, timestamp').all()
       const checklists = db.prepare('SELECT * FROM checklists').all()
       const attachments = db.prepare('SELECT * FROM attachments').all()
+      const comments = db.prepare('SELECT * FROM task_comments ORDER BY created_at ASC').all()
 
-      // Group checklists and attachments by task_id for efficient lookup
+      // Group checklists, attachments and comments by task_id for efficient lookup
       const checklistsByTask = checklists.reduce((acc, checklist) => {
         if (!acc[checklist.task_id]) acc[checklist.task_id] = []
-        acc[checklist.task_id].push({
-          id: checklist.id,
-          title: checklist.title,
-          items: JSON.parse(checklist.items || '[]')
-        })
+        // Each entry in the store is expected to have { id, text, completed }
+        // The checklists table in SQLite uses 'title' and 'items' (JSON)
+        // We'll normalize this back to the store's format.
+        try {
+          const items = JSON.parse(checklist.items || '[]')
+          if (Array.isArray(items) && items.length > 0) {
+            // If items is an array of objects, use them directly (legacy/alternate format)
+            items.forEach(item => acc[checklist.task_id].push({
+              id: item.id || uuidv4(),
+              text: item.text || '',
+              completed: !!item.completed
+            }))
+          } else {
+            // New format: checklist table title is the text
+            acc[checklist.task_id].push({
+              id: checklist.id,
+              text: checklist.title || '',
+              completed: !!(items.completed)
+            })
+          }
+        } catch (e) {
+          acc[checklist.task_id].push({
+            id: checklist.id,
+            text: checklist.title || '',
+            completed: false
+          })
+        }
         return acc
       }, {})
 
@@ -213,6 +248,16 @@ export const boardOperations = {
           title: attachment.title,
           coverImage: attachment.cover_image,
           createdAt: attachment.created_at
+        })
+        return acc
+      }, {})
+
+      const commentsByTask = comments.reduce((acc, comment) => {
+        if (!acc[comment.task_id]) acc[comment.task_id] = []
+        acc[comment.task_id].push({
+          id: comment.id,
+          text: comment.text,
+          createdAt: comment.created_at
         })
         return acc
       }, {})
@@ -273,7 +318,8 @@ export const boardOperations = {
         },
         extendedData: {
           checklists: checklistsByTask[task.id] || [],
-          attachments: attachmentsByTask[task.id] || []
+          attachments: attachmentsByTask[task.id] || [],
+          comments: commentsByTask[task.id] || []
         },
         timeline: taskTimeline
       }
@@ -322,6 +368,7 @@ export const boardOperations = {
         // Clear existing data
         db.prepare('DELETE FROM attachments').run()
         db.prepare('DELETE FROM checklists').run()
+        db.prepare('DELETE FROM task_comments').run()
         db.prepare('DELETE FROM task_timeline').run()
         db.prepare('DELETE FROM tasks').run()
         db.prepare('DELETE FROM columns').run()
@@ -339,6 +386,7 @@ export const boardOperations = {
         const insertTimeline = db.prepare('INSERT INTO task_timeline (task_id, timestamp, action) VALUES (?, ?, ?)')
         const insertChecklist = db.prepare('INSERT INTO checklists (id, task_id, title, items) VALUES (?, ?, ?, ?)')
         const insertAttachment = db.prepare('INSERT INTO attachments (id, task_id, url, title, cover_image, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        const insertComment = db.prepare('INSERT INTO task_comments (id, task_id, text, created_at) VALUES (?, ?, ?, ?)')
 
         boards.forEach((board) => {
           if (!board.id || !board.name) {
@@ -383,7 +431,14 @@ export const boardOperations = {
                   // Insert checklists
                   if (task.extendedData?.checklists) {
                     task.extendedData.checklists.forEach(checklist => {
-                      insertChecklist.run(checklist.id, task.id, checklist.title, JSON.stringify(checklist.items || []))
+                      // Store 'text' as 'title' for backwards compatibility/simplicity
+                      // Store 'completed' in 'items' as a JSON object
+                      insertChecklist.run(
+                        checklist.id, 
+                        task.id, 
+                        checklist.text || '', 
+                        JSON.stringify({ completed: !!checklist.completed })
+                      )
                     })
                   }
 
@@ -391,6 +446,13 @@ export const boardOperations = {
                   if (task.extendedData?.attachments) {
                     task.extendedData.attachments.forEach(attachment => {
                       insertAttachment.run(attachment.id, task.id, attachment.url, attachment.title, attachment.coverImage, attachment.createdAt)
+                    })
+                  }
+
+                  // Insert comments
+                  if (task.extendedData?.comments) {
+                    task.extendedData.comments.forEach(comment => {
+                      insertComment.run(comment.id, task.id, comment.text, comment.createdAt)
                     })
                   }
 
@@ -498,6 +560,9 @@ export const taskOperations = {
       if (extendedData?.attachments) {
         extendedData.attachments.forEach(a => attachmentOperations.create(id, a))
       }
+      if (extendedData?.comments) {
+        extendedData.comments.forEach(c => commentOperations.create(id, c))
+      }
     });
 
     transaction();
@@ -536,12 +601,16 @@ export const taskOperations = {
         // Simple strategy: delete all and re-create
         db.prepare('DELETE FROM checklists WHERE task_id = ?').run(taskId)
         db.prepare('DELETE FROM attachments WHERE task_id = ?').run(taskId)
+        db.prepare('DELETE FROM task_comments WHERE task_id = ?').run(taskId)
 
         if (updates.extendedData.checklists) {
           updates.extendedData.checklists.forEach(c => checklistOperations.create(taskId, c))
         }
         if (updates.extendedData.attachments) {
           updates.extendedData.attachments.forEach(a => attachmentOperations.create(taskId, a))
+        }
+        if (updates.extendedData.comments) {
+          updates.extendedData.comments.forEach(c => commentOperations.create(taskId, c))
         }
       }
     })
@@ -613,13 +682,26 @@ export const taskOperations = {
   }
 }
 
+export const commentOperations = {
+  create: (taskId, commentData) => {
+    const db = getDb()
+    const { id, text, createdAt } = commentData
+    db.prepare('INSERT INTO task_comments (id, task_id, text, created_at) VALUES (?, ?, ?, ?)')
+      .run(id, taskId, text, createdAt)
+  },
+  delete: (commentId) => {
+    const db = getDb()
+    db.prepare('DELETE FROM task_comments WHERE id = ?').run(commentId)
+  }
+}
+
 export const checklistOperations = {
   create: (taskId, checklistData) => {
     const db = getDb()
-    const { id, title, items } = checklistData
-    const itemsJson = JSON.stringify(items || [])
+    const { id, text, completed } = checklistData
+    const itemsJson = JSON.stringify({ completed: !!completed })
     db.prepare('INSERT INTO checklists (id, task_id, title, items) VALUES (?, ?, ?, ?)')
-      .run(id, taskId, title, itemsJson)
+      .run(id, taskId, text || '', itemsJson)
   },
   update: (checklistId, updates) => {
     const db = getDb()

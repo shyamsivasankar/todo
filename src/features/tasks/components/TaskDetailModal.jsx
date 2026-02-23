@@ -33,6 +33,8 @@ export default function TaskDetailModal() {
   const addTaskChecklistItem = useStore((state) => state.addTaskChecklistItem)
   const updateTaskChecklist = useStore((state) => state.updateTaskChecklist)
   const removeTaskChecklistItem = useStore((state) => state.removeTaskChecklistItem)
+  const addTaskComment = useStore((state) => state.addTaskComment)
+  const removeTaskComment = useStore((state) => state.removeTaskComment)
 
   const [board, setBoard] = useState(null)
   const [column, setColumn] = useState(null)
@@ -47,6 +49,7 @@ export default function TaskDetailModal() {
   const [dueDate, setDueDate] = useState('')
   const [moveBoardId, setMoveBoardId] = useState(null)
   const [moveColumnId, setMoveColumnId] = useState(null)
+  const [commentText, setCommentText] = useState('')
 
   useEffect(() => {
     if (!selectedTask) return
@@ -90,6 +93,7 @@ export default function TaskDetailModal() {
   const columnId = isStandalone ? null : column?.id
   const taskId = task.id
   const checklists = task.extendedData?.checklists ?? []
+  const comments = task.extendedData?.comments ?? []
 
   const selectedBoard = moveBoardId ? boards.find((b) => b.id === moveBoardId) : null
   const columnsInSelectedBoard = selectedBoard?.columns ?? []
@@ -284,19 +288,75 @@ export default function TaskDetailModal() {
               </button>
             </div>
 
-            {/* Activity stub */}
-            <div className="border-t border-border pt-6">
-              <div className="flex items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 text-xs font-bold text-white ring-2 ring-surface">
-                  ?
+            {/* Comments Section */}
+            <div className="border-t border-border pt-6 space-y-4">
+              <h3 className="text-sm font-semibold text-text-muted uppercase tracking-wider">Activity</h3>
+              
+              <div className="space-y-4">
+                {comments.map((comment) => (
+                  <div key={comment.id} className="group flex gap-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 text-[10px] font-bold text-white ring-2 ring-surface">
+                      U
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-text-primary">You</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-text-muted">
+                            {new Date(comment.createdAt).toLocaleDateString()} {new Date(comment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <button
+                            onClick={() => removeTaskComment(boardId, columnId, taskId, comment.id)}
+                            className="text-text-muted opacity-0 hover:text-red-400 group-hover:opacity-100 transition-opacity"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-sm text-text-secondary leading-relaxed">
+                        {comment.text}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-start gap-3 pt-2">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 text-xs font-bold text-white ring-2 ring-surface">
+                  U
                 </div>
-                <input
-                  type="text"
-                  placeholder="Add a comment..."
-                  className="flex-1 rounded-lg border border-border bg-surface-light py-2 px-4 text-sm text-white outline-none placeholder:text-text-muted focus:ring-2 focus:ring-primary/50"
-                  readOnly
-                  disabled
-                />
+                <div className="flex-1 space-y-2">
+                  <textarea
+                    placeholder="Add a comment..."
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        if (commentText.trim()) {
+                          addTaskComment(boardId, columnId, taskId, commentText)
+                          setCommentText('')
+                        }
+                      }
+                    }}
+                    className="w-full min-h-[80px] rounded-lg border border-border bg-surface-light py-2 px-4 text-sm text-white outline-none placeholder:text-text-muted focus:ring-2 focus:ring-primary/50 resize-none"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={!commentText.trim()}
+                      onClick={() => {
+                        if (commentText.trim()) {
+                          addTaskComment(boardId, columnId, taskId, commentText)
+                          setCommentText('')
+                        }
+                      }}
+                      className="rounded-lg bg-primary/20 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Comment
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

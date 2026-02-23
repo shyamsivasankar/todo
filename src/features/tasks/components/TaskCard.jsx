@@ -34,9 +34,10 @@ function formatDueDate(dateStr) {
   }
 }
 
-export default function TaskCard({ boardId, columnId, task, isDone = false, onOpen }) {
+export default function TaskCard({ boardId, columnId, task, isDone = false, onOpen, isOverlay = false }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
+    disabled: isOverlay,
     data: {
       type: 'task',
       boardId,
@@ -45,7 +46,16 @@ export default function TaskCard({ boardId, columnId, task, isDone = false, onOp
     },
   })
 
-  const style = transform
+  if (!isOverlay && isDragging) {
+    return (
+      <div
+        ref={setNodeRef}
+        className="h-[162px] w-full rounded-lg bg-primary/5 border border-dashed border-primary/20"
+      />
+    )
+  }
+
+  const style = !isOverlay && transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
     : undefined
 
@@ -56,14 +66,15 @@ export default function TaskCard({ boardId, columnId, task, isDone = false, onOp
 
   return (
     <article
-      ref={setNodeRef}
+      ref={isOverlay ? null : setNodeRef}
       style={style}
-      className={`rounded-lg p-4 transition-lift group backdrop-blur-sm border shadow-sm ${isDragging
+      className={`rounded-lg p-4 transition-lift group backdrop-blur-sm border shadow-sm ${
+        !isOverlay && isDragging
           ? 'cursor-grabbing opacity-70 bg-surface/80 border-primary/50'
           : 'cursor-grab bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10 glass-card'
         }`}
-      {...attributes}
-      {...listeners}
+      {...(!isOverlay ? attributes : {})}
+      {...(!isOverlay ? listeners : {})}
     >
       {/* Priority badge + edit button */}
       <div className="flex justify-between items-start mb-2">
