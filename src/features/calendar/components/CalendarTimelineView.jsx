@@ -26,10 +26,29 @@ const PRIORITY_COLORS = {
 const PRIORITY_LABELS = { high: 'HIGH', medium: 'MED', low: 'LOW' }
 
 export default function CalendarTimelineView({ onCreateTask, priorityFilter = null }) {
-  const boards = useStore((state) => state.boards)
-  const standaloneTasks = useStore((state) => state.standaloneTasks)
-  const openTaskDetail = useStore((state) => state.openTaskDetail)
-  const activeBoardId = useStore((state) => state.activeBoardId)
+  const { boards, standaloneTasks, openTaskDetail, activeBoardId } = useStore()
+
+  const handleTaskClick = (taskId) => {
+    let foundBoardId = null
+    let foundColumnId = null
+
+    const isStandalone = (standaloneTasks || []).some((t) => t.id === taskId)
+
+    if (!isStandalone) {
+      for (const board of boards || []) {
+        for (const column of board.columns || []) {
+          if ((column.tasks || []).some((t) => t.id === taskId)) {
+            foundBoardId = board.id
+            foundColumnId = column.id
+            break
+          }
+        }
+        if (foundBoardId) break
+      }
+    }
+
+    openTaskDetail(foundBoardId, foundColumnId, taskId)
+  }
 
   const [calendarDate, setCalendarDate] = useState(() => new Date())
   const [selectedDateKey, setSelectedDateKey] = useState(() =>
@@ -168,7 +187,11 @@ export default function CalendarTimelineView({ onCreateTask, priorityFilter = nu
                         {dayTasks.slice(0, 2).map(({ task }) => (
                           <div
                             key={task.id}
-                            className={`w-full truncate rounded-r border-l-2 pl-2 py-0.5 text-[10px] ${
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleTaskClick(task.id)
+                            }}
+                            className={`w-full truncate rounded-r border-l-2 pl-2 py-0.5 text-[10px] cursor-pointer hover:brightness-125 transition-all ${
                               task.settings?.priority === 'high'
                                 ? 'border-red-500 bg-red-500/10 text-red-400'
                                 : task.settings?.priority === 'low'
@@ -248,13 +271,11 @@ export default function CalendarTimelineView({ onCreateTask, priorityFilter = nu
                       </span>
                       <div className="h-px flex-1 bg-border" />
                     </div>
-                    {list.map(({ task, boardName, boardId, columnId }) => (
+                    {list.map(({ task, boardName }) => (
                       <button
                         key={task.id}
                         type="button"
-                        onClick={() =>
-                          openTaskDetail(boardId, columnId, task.id)
-                        }
+                        onClick={() => handleTaskClick(task.id)}
                         className="group relative mb-3 w-full overflow-hidden rounded-lg border border-border bg-surface p-3 text-left shadow-sm transition-all hover:border-primary hover:shadow-md"
                       >
                         <div

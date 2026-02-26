@@ -1,12 +1,14 @@
-import { app, BrowserWindow, ipcMain, Menu, shell, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, shell, dialog, Notification } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
-import { boardOperations, deletedTasksOperations, settingsOperations, taskOperations } from './database.js'
+import { boardOperations, deletedTasksOperations, settingsOperations, taskOperations, notificationOperations, noteOperations, getDb } from './database.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const isDev = !app.isPackaged
+
+let mainWindow = null
 
 // IPC Validation Schemas
 const TaskSchema = z.object({
@@ -65,6 +67,15 @@ const DeletedTaskSchema = z.object({
 
 const SettingsSchema = z.record(z.any())
 
+const NoteSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  content: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  taskIds: z.array(z.string()).optional(),
+})
+
 const FileOpenSchema = z.string()
 
 const FileBrowseSchema = z.object({
@@ -77,7 +88,7 @@ const createWindow = () => {
   const preloadPath = path.join(__dirname, 'preload.js')
   console.log('[Main] Preload path:', preloadPath)
   
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1480,
     height: 920,
     minWidth: 1080,
@@ -94,23 +105,96 @@ const createWindow = () => {
 
   // Open DevTools automatically in development mode
   if (isDev) {
-    // win.webContents.openDevTools()
+    // mainWindow.webContents.openDevTools()
   }
 
   if (isDev) {
     const loadDevUrl = () => {
-      win
+      mainWindow
         .loadURL('http://127.0.0.1:5173')
         .catch(() => setTimeout(loadDevUrl, 500))
     }
 
     loadDevUrl()
-    return
+    return mainWindow
   }
 
-  win.loadFile(path.join(__dirname, '../dist/index.html'))
+  mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   
-  return win
+  return mainWindow
+}
+
+/**
+ * Checks for upcoming deadlines and triggers notifications.
+ */
+function checkDeadlines() {
+  try {
+    const db = getDb()
+    const now = new Date()
+    
+    // Query for tasks that are not completed and have a due date
+    const tasks = db.prepare(`
+      SELECT id, heading, due_date 
+      FROM tasks 
+      WHERE completed = 0 
+      AND due_date IS NOT NULL 
+      AND due_date != ''
+    `).all()
+
+    for (const task of tasks) {
+      // Ensure the date is parsed as UTC
+      let dueDateStr = task.due_date
+      if (dueDateStr && !dueDateStr.endsWith('Z') && !dueDateStr.includes('+')) {
+        dueDateStr += 'Z'
+      }
+      const dueDate = new Date(dueDateStr)
+      const diffMs = dueDate - now
+      const diffMins = Math.floor(diffMs / (1000 * 60))
+
+      let triggerType = null
+      let message = ""
+
+      // Check for 15 minutes, 1 hour, and 24 hours
+      if (diffMins > 0 && diffMins <= 15) {
+        triggerType = '15m'
+        message = `Task "${task.heading}" is due in 15 minutes!`
+      } else if (diffMins > 15 && diffMins <= 60) {
+        triggerType = '1h'
+        message = `Task "${task.heading}" is due in 1 hour!`
+      } else if (diffMins > 60 && diffMins <= 1440) {
+        triggerType = '24h'
+        message = `Task "${task.heading}" is due in 24 hours!`
+      }
+
+      if (triggerType && !notificationOperations.hasBeenSent(task.id, triggerType)) {
+        // Trigger native notification
+        const notification = new Notification({
+          title: 'FocusFlow Deadline Reminder',
+          body: message,
+          silent: false,
+        })
+
+        notification.on('click', () => {
+          if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore()
+            mainWindow.focus()
+          }
+        })
+
+        notification.show()
+
+        // Log in database
+        notificationOperations.create(task.id, triggerType)
+
+        // Notify renderer to refresh notification center
+        if (mainWindow) {
+          mainWindow.webContents.send('notify:update')
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[Main] Error checking deadlines:', error)
+  }
 }
 
 // Create application menu with DevTools option
@@ -314,6 +398,86 @@ app.whenReady().then(() => {
       console.error('[IPC] Error in task:move:', error)
     }
   })
+
+  // Notification operations
+  ipcMain.handle('notifications:get', () => {
+    return notificationOperations.getAll()
+  })
+
+  ipcMain.on('notifications:markAsRead', (_event, notificationId) => {
+    try {
+      notificationOperations.markAsRead(notificationId)
+    } catch (error) {
+      console.error('[IPC] Error in notifications:markAsRead:', error)
+    }
+  })
+
+  // Note operations
+  ipcMain.handle('notes:get', () => {
+    try {
+      return noteOperations.getAll()
+    } catch (error) {
+      console.error('[IPC] Error in notes:get:', error)
+      return []
+    }
+  })
+
+  ipcMain.on('notes:set', (_event, notes) => {
+    try {
+      const validatedNotes = z.array(NoteSchema).parse(notes)
+      noteOperations.saveAll(validatedNotes)
+    } catch (error) {
+      console.error('[IPC] Error in notes:set:', error)
+    }
+  })
+
+  ipcMain.handle('notes:create', (_event, note) => {
+    try {
+      const validatedNote = NoteSchema.parse(note)
+      noteOperations.create(validatedNote)
+      return { success: true }
+    } catch (error) {
+      console.error('[IPC] Error in notes:create:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.on('notes:update', (_event, { id, updates }) => {
+    try {
+      const validatedUpdates = NoteSchema.partial().parse(updates)
+      noteOperations.update(id, validatedUpdates)
+    } catch (error) {
+      console.error('[IPC] Error in notes:update:', error)
+    }
+  })
+
+  ipcMain.on('notes:delete', (_event, id) => {
+    try {
+      noteOperations.delete(id)
+    } catch (error) {
+      console.error('[IPC] Error in notes:delete:', error)
+    }
+  })
+
+  ipcMain.on('notes:linkToTask', (_event, { noteId, taskId }) => {
+    try {
+      noteOperations.linkToTask(noteId, taskId)
+    } catch (error) {
+      console.error('[IPC] Error in notes:linkToTask:', error)
+    }
+  })
+
+  ipcMain.on('notes:unlinkFromTask', (_event, { noteId, taskId }) => {
+    try {
+      noteOperations.unlinkFromTask(noteId, taskId)
+    } catch (error) {
+      console.error('[IPC] Error in notes:unlinkFromTask:', error)
+    }
+  })
+
+  // Start deadline check scheduler
+  checkDeadlines() // Run immediately on startup
+  setInterval(checkDeadlines, 60000) // Then every 60 seconds
 
   /**
    * Validates if a path is within a set of whitelisted directories.

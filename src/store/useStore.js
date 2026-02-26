@@ -28,6 +28,7 @@ const defaultTaskSettings = {
   tags: [],
   dueDate: '',
   status: 'To Do',
+  completed: false,
 }
 
 const defaultExtendedData = {
@@ -70,6 +71,9 @@ const describeTaskUpdate = (previousTask, updates) => {
     if (nextSettings.dueDate !== undefined && nextSettings.dueDate !== previousSettings.dueDate) {
       changed.push('due date')
     }
+    if (nextSettings.completed !== undefined && nextSettings.completed !== previousSettings.completed) {
+      changed.push(nextSettings.completed ? 'completed' : 'reopened')
+    }
     if (Array.isArray(nextSettings.tags)) {
       const previousTags = (previousSettings.tags || []).join(',')
       const nextTags = nextSettings.tags.join(',')
@@ -91,6 +95,7 @@ let boardsFirstEmit = true
 let deletedTasksFirstEmit = true
 let settingsFirstEmit = true
 let activeBoardIdFirstEmit = true
+let notesFirstEmit = true
 
 export const useStore = create(
   subscribeWithSelector((set) => ({
@@ -99,8 +104,11 @@ export const useStore = create(
     activeBoardId: null,
     selectedTask: null,
     deletedTasks: [],
+    notes: [],
     uiSettings: defaultUiSettings,
     hydrationComplete: false,
+    activeView: 'boards',
+    selectedNoteId: null,
 
     hydrateBoards: (boards, savedActiveBoardId = null, standaloneTasks = []) =>
       set((state) => {
@@ -147,6 +155,11 @@ export const useStore = create(
         deletedTasks: Array.isArray(deletedTasks) ? deletedTasks : [],
       })),
 
+    hydrateNotes: (notes) =>
+      set(() => ({
+        notes: Array.isArray(notes) ? notes : [],
+      })),
+
     hydrateSettings: (settings) =>
       set((state) => {
         const newSettings = {
@@ -179,6 +192,81 @@ export const useStore = create(
           },
         }
       }),
+
+    setActiveView: (view) => set({ activeView: view }),
+    setSelectedNoteId: (id) => set({ selectedNoteId: id }),
+
+    addNote: (payload) => {
+      const id = uuidv4()
+      const now = new Date().toISOString()
+      const note = {
+        id,
+        title: payload.title || 'Untitled Note',
+        content: payload.content || '',
+        taskIds: [],
+        createdAt: now,
+        updatedAt: now,
+      }
+
+      set((state) => ({
+        notes: [note, ...state.notes],
+      }))
+
+      if (window.electronAPI?.createNote) {
+        window.electronAPI.createNote(note)
+      }
+    },
+
+    updateNote: (id, updates) => {
+      const now = new Date().toISOString()
+      set((state) => ({
+        notes: state.notes.map((note) =>
+          note.id === id ? { ...note, ...updates, updatedAt: now } : note,
+        ),
+      }))
+
+      if (window.electronAPI?.updateNote) {
+        window.electronAPI.updateNote(id, { ...updates, updatedAt: now })
+      }
+    },
+
+    removeNote: (id) => {
+      set((state) => ({
+        notes: state.notes.filter((note) => note.id !== id),
+      }))
+
+      if (window.electronAPI?.deleteNote) {
+        window.electronAPI.deleteNote(id)
+      }
+    },
+
+    linkNoteToTask: (noteId, taskId) => {
+      set((state) => ({
+        notes: state.notes.map((note) =>
+          note.id === noteId
+            ? { ...note, taskIds: [...new Set([...(note.taskIds || []), taskId])] }
+            : note,
+        ),
+      }))
+
+      if (window.electronAPI?.linkNoteToTask) {
+        window.electronAPI.linkNoteToTask(noteId, taskId)
+      }
+    },
+
+    unlinkNoteFromTask: (noteId, taskId) => {
+      set((state) => ({
+        notes: state.notes.map((note) =>
+          note.id === noteId
+            ? { ...note, taskIds: (note.taskIds || []).filter((id) => id !== taskId) }
+            : note,
+        ),
+      }))
+
+      if (window.electronAPI?.unlinkNoteFromTask) {
+        window.electronAPI.unlinkNoteFromTask(noteId, taskId)
+      }
+    },
 
     createBoard: (boardName, columnTitles) => {
       const result = set((state) => {
@@ -498,6 +586,7 @@ export const useStore = create(
             tags: task.settings.tags,
             due_date: task.settings.dueDate,
             status: task.settings.status,
+            completed: task.settings.completed,
             extended_data: task.extendedData,
             position,
           }
@@ -523,6 +612,7 @@ export const useStore = create(
 
                 position = column.tasks.length
 
+                const isDoneColumn = column.title.toLowerCase() === 'done'
                 const task = {
                   id: taskId,
                   heading: payload.heading?.trim() || 'Untitled Task',
@@ -533,9 +623,10 @@ export const useStore = create(
                     ...defaultTaskSettings,
                     ...payload.settings,
                     status: column.title,
+                    completed: isDoneColumn ? true : (payload.settings?.completed ?? defaultTaskSettings.completed),
                   },
                   extendedData: { ...defaultExtendedData, ...(payload.extendedData || {}) },
-                  timeline: [createTimelineEntry(`Created in ${column.title}`)],
+                  timeline: [createTimelineEntry(`Created in ${column.title}${isDoneColumn ? ' (marked as completed)' : ''}`)],
                 }
 
                 taskForApi = {
@@ -550,6 +641,7 @@ export const useStore = create(
                   tags: task.settings.tags,
                   due_date: task.settings.dueDate,
                   status: task.settings.status,
+                  completed: task.settings.completed,
                   extended_data: task.extendedData,
                   position,
                 }
@@ -788,15 +880,21 @@ export const useStore = create(
               return board
             }
 
+            const isDoneColumn = targetColumn.title.toLowerCase() === 'done'
             const taskWithTimeline = {
               ...taskToMove,
               settings: {
                 ...taskToMove.settings,
                 status: targetColumn.title,
+                completed: isDoneColumn ? true : taskToMove.settings.completed,
               },
               timeline: [
                 ...taskToMove.timeline,
-                createTimelineEntry(`Moved from ${sourceColumn.title} to ${targetColumn.title}`),
+                createTimelineEntry(
+                  `Moved from ${sourceColumn.title} to ${targetColumn.title}${
+                    isDoneColumn ? ' (marked as completed)' : ''
+                  }`,
+                ),
               ],
             }
 
@@ -856,15 +954,20 @@ export const useStore = create(
           return state
         }
 
+        const targetBoard = state.boards.find((b) => b.id === targetBoardId)
+        const targetCol = targetBoard?.columns.find((c) => c.id === targetColumnId)
         const isTargetStandalone = !targetBoardId || !targetColumnId
+        const isDoneColumn = targetCol?.title.toLowerCase() === 'done'
         const moveEntry = isTargetStandalone
           ? createTimelineEntry('Moved to standalone')
           : (() => {
-              const targetBoard = state.boards.find((b) => b.id === targetBoardId)
-              const targetCol = targetBoard?.columns.find((c) => c.id === targetColumnId)
               const colTitle = targetCol?.title ?? 'Unknown'
               const boardName = targetBoard?.name ?? 'Unknown'
-              return createTimelineEntry(`Moved to ${boardName} / ${colTitle}`)
+              return createTimelineEntry(
+                `Moved to ${boardName} / ${colTitle}${
+                  isDoneColumn ? ' (marked as completed)' : ''
+                }`,
+              )
             })()
 
         const taskWithTimeline = {
@@ -874,10 +977,8 @@ export const useStore = create(
             ...(isTargetStandalone
               ? {}
               : {
-                  status:
-                    state.boards
-                      .find((b) => b.id === targetBoardId)
-                      ?.columns.find((c) => c.id === targetColumnId)?.title ?? 'To Do',
+                  status: targetCol?.title ?? 'To Do',
+                  completed: isDoneColumn ? true : taskToMove.settings.completed,
                 }),
           },
           timeline: [...taskToMove.timeline, moveEntry],
@@ -1416,6 +1517,50 @@ export const useStore = create(
       }),
 
     closeTaskDetail: () => set({ selectedTask: null }),
+
+    notifications: [],
+    unreadCount: 0,
+
+    fetchNotifications: async () => {
+      if (window.electronAPI?.getNotifications) {
+        try {
+          const notifications = await window.electronAPI.getNotifications()
+          const mappedNotifications = notifications.map((n) => ({
+            ...n,
+            is_read: !!n.read_at,
+          }))
+          const unreadCount = mappedNotifications.filter((n) => !n.is_read).length
+          set({ notifications: mappedNotifications, unreadCount })
+        } catch (error) {
+          console.error('[Store] Error fetching notifications:', error)
+        }
+      }
+    },
+
+    markNotificationRead: async (id) => {
+      if (window.electronAPI?.markNotificationAsRead) {
+        try {
+          await window.electronAPI.markNotificationAsRead(id)
+          set((state) => {
+            const nextNotifications = state.notifications.map((n) =>
+              n.id === id ? { ...n, is_read: true } : n,
+            )
+            const unreadCount = nextNotifications.filter((n) => !n.is_read).length
+            return { notifications: nextNotifications, unreadCount }
+          })
+        } catch (error) {
+          console.error('[Store] Error marking notification as read:', error)
+        }
+      }
+    },
+
+    dismissNotification: (id) => {
+      set((state) => {
+        const nextNotifications = state.notifications.filter((n) => n.id !== id)
+        const unreadCount = nextNotifications.filter((n) => !n.is_read).length
+        return { notifications: nextNotifications, unreadCount }
+      })
+    },
   })),
 )
 
@@ -1567,6 +1712,28 @@ export const attachBoardPersistence = () => {
         }
       } catch (error) {
         console.error('Failed to save settings:', error)
+      }
+    },
+  )
+
+  useStore.subscribe(
+    (state) => state.notes,
+    (notes) => {
+      if (notesFirstEmit) {
+        notesFirstEmit = false
+        return
+      }
+      if (!useStore.getState().hydrationComplete) {
+        return
+      }
+      try {
+        if (window.electronAPI?.saveNotes) {
+          window.electronAPI.saveNotes(notes)
+        } else {
+          localStorage.setItem('todo_notes', JSON.stringify(notes))
+        }
+      } catch (error) {
+        console.error('Failed to save notes:', error)
       }
     },
   )

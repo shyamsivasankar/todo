@@ -11,6 +11,7 @@ import TaskCard from './features/tasks/components/TaskCard'
 const KanbanBoard = lazy(() => import('./features/boards/components/KanbanBoard'))
 const TasksPage = lazy(() => import('./features/tasks/pages/TasksPage'))
 const CalendarPage = lazy(() => import('./features/calendar/pages/CalendarPage'))
+const NotesPage = lazy(() => import('./features/notes/pages/NotesPage'))
 const SettingsPage = lazy(() => import('./features/settings/pages/SettingsPage'))
 
 // Lazy-loaded modals
@@ -29,13 +30,15 @@ function App() {
   const hydrateBoards = useStore((state) => state.hydrateBoards)
   const hydrateDeletedTasks = useStore((state) => state.hydrateDeletedTasks)
   const hydrateSettings = useStore((state) => state.hydrateSettings)
+  const hydrateNotes = useStore((state) => state.hydrateNotes)
   const hydrationComplete = useStore((state) => state.hydrationComplete)
   const moveTask = useStore((state) => state.moveTask)
   const openTaskDetail = useStore((state) => state.openTaskDetail)
   const selectedTask = useStore((state) => state.selectedTask)
   const standaloneTasks = useStore((state) => state.standaloneTasks)
+  const activeView = useStore((state) => state.activeView)
+  const setActiveView = useStore((state) => state.setActiveView)
 
-  const [activeView, setActiveView] = useState('boards')
   const [boardModalOpen, setBoardModalOpen] = useState(false)
   const [boardToEdit, setBoardToEdit] = useState(null)
   const [taskModalState, setTaskModalState] = useState({
@@ -116,6 +119,7 @@ function App() {
           hydrateBoards([], null, [])
           hydrateDeletedTasks([])
           hydrateSettings({})
+          hydrateNotes([])
         }
       }, 1000)
 
@@ -123,12 +127,14 @@ function App() {
         let boardsData = { boards: [], activeBoardId: null }
         let diskDeletedTasks = []
         let diskSettings = {}
+        let diskNotes = []
 
         if (window.electronAPI) {
           const electronBoards = await window.electronAPI.getBoards?.()
           boardsData = electronBoards || { boards: [], activeBoardId: null }
           diskDeletedTasks = (await window.electronAPI.getDeletedTasks?.()) || []
           diskSettings = (await window.electronAPI.getSettings?.()) || {}
+          diskNotes = (await window.electronAPI.getNotes?.()) || []
         } else {
           try {
             const stored = localStorage.getItem('todo_boards')
@@ -141,6 +147,10 @@ function App() {
           try {
             const stored = localStorage.getItem('todo_settings')
             if (stored) diskSettings = JSON.parse(stored)
+          } catch { /* ignore */ }
+          try {
+            const stored = localStorage.getItem('todo_notes')
+            if (stored) diskNotes = JSON.parse(stored)
           } catch { /* ignore */ }
         }
 
@@ -156,6 +166,7 @@ function App() {
           hydrateBoards(diskBoards, savedActiveBoardId || diskSettings?.activeBoardId, diskStandaloneTasks)
           hydrateDeletedTasks(diskDeletedTasks)
           hydrateSettings(diskSettings)
+          hydrateNotes(diskNotes)
         }
 
         attachBoardPersistence()
@@ -166,6 +177,7 @@ function App() {
           hydrateBoards([], null, [])
           hydrateDeletedTasks([])
           hydrateSettings({})
+          hydrateNotes([])
         }
         attachBoardPersistence()
       }
@@ -181,6 +193,7 @@ function App() {
           window.electronAPI.saveBoards(currentState.boards, currentState.activeBoardId, currentState.standaloneTasks)
           window.electronAPI.saveDeletedTasks(currentState.deletedTasks)
           window.electronAPI.saveSettings(currentState.uiSettings)
+          window.electronAPI.saveNotes(currentState.notes)
         } else {
           localStorage.setItem('todo_boards', JSON.stringify({
             boards: currentState.boards,
@@ -189,6 +202,7 @@ function App() {
           }))
           localStorage.setItem('todo_deletedTasks', JSON.stringify(currentState.deletedTasks))
           localStorage.setItem('todo_settings', JSON.stringify(currentState.uiSettings))
+          localStorage.setItem('todo_notes', JSON.stringify(currentState.notes))
         }
       } catch (error) {
         console.error('[App] Error saving data:', error)
@@ -201,10 +215,10 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (uiSettings.startView && ['boards', 'tasks', 'calendar', 'settings'].includes(uiSettings.startView)) {
+    if (uiSettings.startView && ['boards', 'tasks', 'calendar', 'notes', 'settings'].includes(uiSettings.startView)) {
       setActiveView(uiSettings.startView)
     }
-  }, [uiSettings.startView])
+  }, [uiSettings.startView, setActiveView])
 
   const onDragStart = ({ active }) => {
     setActiveId(active.id)
@@ -460,6 +474,15 @@ function App() {
           <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
             <Suspense fallback={<LoadingFallback message="Loading calendar..." />}>
               <CalendarPage onCreateTask={openTaskCreateModal} />
+            </Suspense>
+          </div>
+        )}
+
+        {/* Notes View */}
+        {activeView === 'notes' && (
+          <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+            <Suspense fallback={<LoadingFallback message="Loading notes..." />}>
+              <NotesPage />
             </Suspense>
           </div>
         )}

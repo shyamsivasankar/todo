@@ -15,10 +15,19 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../../../store/useStore'
 import MarkdownDescription from './MarkdownDescription'
 
+const toLocalISOString = (date) => {
+  if (!date) return ''
+  const d = new Date(date)
+  if (isNaN(d.getTime())) return ''
+  const offset = d.getTimezoneOffset() * 60000
+  const localISOTime = new Date(d.getTime() - offset).toISOString().slice(0, 16)
+  return localISOTime
+}
+
 const priorityOptions = [
-  { value: 'low', label: 'Low', className: 'bg-slate-100 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300' },
-  { value: 'medium', label: 'Medium', className: 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20 text-amber-700 dark:text-amber-400' },
-  { value: 'high', label: 'High', className: 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20 text-red-700 dark:text-red-400' },
+  { value: 'low', label: 'Low', className: 'bg-slate-700 text-slate-300 border-slate-600' },
+  { value: 'medium', label: 'Medium', className: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' },
+  { value: 'high', label: 'High', className: 'bg-red-500/20 text-red-300 border-red-500/30' },
 ]
 
 export default function TaskDetailModal() {
@@ -47,6 +56,7 @@ export default function TaskDetailModal() {
   const [priority, setPriority] = useState('medium')
   const [tags, setTags] = useState([])
   const [dueDate, setDueDate] = useState('')
+  const [completed, setCompleted] = useState(false)
   const [moveBoardId, setMoveBoardId] = useState(null)
   const [moveColumnId, setMoveColumnId] = useState(null)
   const [commentText, setCommentText] = useState('')
@@ -57,34 +67,54 @@ export default function TaskDetailModal() {
     if (!selectedTask.boardId || !selectedTask.columnId) {
       const t = standaloneTasks.find((item) => item.id === selectedTask.taskId)
       if (!t) return
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setBoard(null)
+       
       setColumn(null)
+       
       setTask(t)
+       
       setIsStandalone(true)
+       
       setMoveBoardId(null)
+       
       setMoveColumnId(null)
     } else {
       const b = boards.find((item) => item.id === selectedTask.boardId)
       const c = b?.columns.find((item) => item.id === selectedTask.columnId)
       const t = c?.tasks.find((item) => item.id === selectedTask.taskId)
       if (!b || !c || !t) return
+       
       setBoard(b)
+       
       setColumn(c)
+       
       setTask(t)
+       
       setIsStandalone(false)
+       
       setMoveBoardId(b.id)
+       
       setMoveColumnId(c.id)
     }
   }, [boards, standaloneTasks, selectedTask])
 
   useEffect(() => {
     if (!task) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHeading(task.heading ?? '')
+     
     setTldr(task.tldr ?? '')
+     
     setDescription(task.description ?? '')
+     
     setPriority(task.settings?.priority ?? 'medium')
+     
     setTags(Array.isArray(task.settings?.tags) ? task.settings.tags : [])
-    setDueDate(task.settings?.dueDate ?? '')
+     
+    setDueDate(toLocalISOString(task.settings?.dueDate))
+     
+    setCompleted(!!task.settings?.completed)
   }, [task])
 
   if (!task || !selectedTask) return null
@@ -104,6 +134,12 @@ export default function TaskDetailModal() {
     const targetBoardId = moveBoardId || null
     const targetColumnId = moveColumnId || null
 
+    const targetColumn = targetBoardId 
+      ? boards.find(b => b.id === targetBoardId)?.columns.find(c => c.id === targetColumnId)
+      : null
+    const isDoneColumn = targetColumn?.title.toLowerCase() === 'done'
+    const finalCompleted = isDoneColumn ? true : completed
+
     const locationChanged = sourceBoardId !== targetBoardId || sourceColumnId !== targetColumnId
     if (locationChanged) {
       moveTaskToBoard(sourceBoardId, sourceColumnId, taskId, targetBoardId, targetColumnId)
@@ -116,9 +152,14 @@ export default function TaskDetailModal() {
       settings: {
         priority,
         tags,
-        dueDate: dueDate || undefined,
+        dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+        completed: finalCompleted,
       },
     })
+
+    if (isDoneColumn && !completed) {
+      setCompleted(true)
+    }
   }
 
   const handleDelete = () => {
@@ -365,6 +406,36 @@ export default function TaskDetailModal() {
           <aside className="w-full shrink-0 space-y-6 overflow-y-auto border-t border-border bg-bg-deep p-6 lg:w-[320px] lg:border-t-0 lg:border-l custom-scrollbar">
             {/* Status & actions */}
             <div className="space-y-4">
+              <label className="flex items-center gap-3 rounded-lg border border-border bg-surface-light p-3 transition-colors hover:bg-card-hover cursor-pointer">
+                <div className="relative flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={completed}
+                    onChange={(e) => {
+                      setCompleted(e.target.checked)
+                      // We need to call save with the new value, but since setCompleted is async,
+                      // we'll pass it directly to updateTask or use a temporary variable.
+                      const nextCompleted = e.target.checked
+                      updateTask(moveBoardId, moveColumnId, taskId, {
+                        settings: {
+                          priority,
+                          tags,
+                          dueDate: dueDate || undefined,
+                          completed: nextCompleted,
+                        },
+                      })
+                    }}
+                    className="peer h-5 w-5 cursor-pointer appearance-none rounded border border-border-light bg-transparent transition-all checked:border-emerald-500 checked:bg-emerald-500"
+                  />
+                  <span className="pointer-events-none absolute left-0.5 top-0.5 hidden h-4 w-4 text-white peer-checked:block">
+                    ✓
+                  </span>
+                </div>
+                <span className={`text-sm font-semibold ${completed ? 'text-emerald-500' : 'text-text-primary'}`}>
+                  {completed ? 'Completed' : 'Mark as Completed'}
+                </span>
+              </label>
+
               <div className="relative">
                 <select
                   value={moveColumnId ?? ''}
@@ -470,7 +541,7 @@ export default function TaskDetailModal() {
                   <Calendar className="h-4 w-4" />
                 </div>
                 <input
-                  type="date"
+                  type="datetime-local"
                   value={dueDate}
                   onChange={(e) => {
                     setDueDate(e.target.value)
@@ -490,9 +561,22 @@ export default function TaskDetailModal() {
                 {tags.map((tag, i) => (
                   <span
                     key={`${tag}-${i}`}
-                    className="rounded border border-indigo-500/20 bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-300"
+                    className="group relative rounded border border-indigo-500/20 bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-300 transition-all hover:pr-7"
                   >
                     {tag}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextTags = tags.filter((_, idx) => idx !== i)
+                        setTags(nextTags)
+                        updateTask(boardId, columnId, taskId, {
+                          settings: { ...task.settings, priority, dueDate, tags: nextTags },
+                        })
+                      }}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-indigo-300/50 opacity-0 transition-all hover:bg-indigo-500/30 hover:text-indigo-100 group-hover:opacity-100"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
                   </span>
                 ))}
                 <input

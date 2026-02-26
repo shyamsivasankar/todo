@@ -22,9 +22,30 @@ const PRIORITY_BAR_COLORS = {
 }
 
 export default function GanttTimelineView({ priorityFilter = null }) {
-  const boards = useStore((state) => state.boards)
-  const standaloneTasks = useStore((state) => state.standaloneTasks)
-  const openTaskDetail = useStore((state) => state.openTaskDetail)
+  const { boards, standaloneTasks, openTaskDetail } = useStore()
+
+  const handleTaskClick = (taskId) => {
+    // Dynamically find task location to avoid stale board/column IDs
+    let foundBoardId = null
+    let foundColumnId = null
+
+    const isStandalone = (standaloneTasks || []).some((t) => t.id === taskId)
+
+    if (!isStandalone) {
+      for (const board of boards || []) {
+        for (const column of board.columns || []) {
+          if ((column.tasks || []).some((t) => t.id === taskId)) {
+            foundBoardId = board.id
+            foundColumnId = column.id
+            break
+          }
+        }
+        if (foundBoardId) break
+      }
+    }
+
+    openTaskDetail(foundBoardId, foundColumnId, taskId)
+  }
 
   const [rangeStart] = useState(() => {
     const d = new Date()
@@ -251,7 +272,7 @@ export default function GanttTimelineView({ priorityFilter = null }) {
             {boardsWithTasks.map(({ board, tasks, totalLanes }) => (
               <div
                 key={board.id}
-                className="relative border-b border-border"
+                className="relative border-b border-border hover:z-30"
                 style={{
                   height: getRowHeight(totalLanes),
                   minHeight: getRowHeight(totalLanes),
@@ -266,7 +287,7 @@ export default function GanttTimelineView({ priorityFilter = null }) {
                   return (
                     <div
                       key={item.task.id}
-                      className={`group absolute z-10 flex cursor-pointer items-center rounded-md border px-2 shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/50 ${PRIORITY_BAR_COLORS[priority] || PRIORITY_BAR_COLORS.medium}`}
+                      className={`group absolute z-10 hover:z-40 flex cursor-pointer items-center rounded-md border px-2 shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/50 ${PRIORITY_BAR_COLORS[priority] || PRIORITY_BAR_COLORS.medium}`}
                       style={{
                         left: startLeft + 4,
                         top,
@@ -275,13 +296,11 @@ export default function GanttTimelineView({ priorityFilter = null }) {
                         height: 32,
                       }}
                       tabIndex={0}
-                      onClick={() =>
-                        openTaskDetail(item.boardId, item.columnId, item.task.id)
-                      }
+                      onClick={() => handleTaskClick(item.task.id)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault()
-                          openTaskDetail(item.boardId, item.columnId, item.task.id)
+                          handleTaskClick(item.task.id)
                         }
                       }}
                       title={item.task.heading}

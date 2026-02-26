@@ -1,4 +1,5 @@
 import { AlertTriangle, Clock } from 'lucide-react'
+import { useStore } from '../../../store/useStore'
 
 const priorityStyles = {
   high: { text: 'text-orange-400', label: 'High', icon: true },
@@ -22,15 +23,15 @@ function formatTimeAgo(dateStr) {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function formatDueDateShort(dateStr) {
+function formatDueDateShort(dateStr, isCompleted = false) {
   if (!dateStr) return null
   const due = new Date(dateStr)
   const now = new Date()
   const diffMs = due - now
   const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
 
-  if (diffDays < 0) return { text: 'Overdue', urgent: true }
-  if (diffDays === 0) return { text: 'Due Today', urgent: true }
+  if (!isCompleted && diffDays < 0) return { text: 'Overdue', urgent: true }
+  if (diffDays === 0) return { text: 'Due Today', urgent: !isCompleted }
   if (diffDays === 1) return { text: 'Tomorrow', urgent: false }
   return {
     text: due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -39,10 +40,12 @@ function formatDueDateShort(dateStr) {
 }
 
 export default function TaskListItem({ item, isSelected, onSelect }) {
-  const { task, status, isStandalone } = item
+  const updateTask = useStore((state) => state.updateTask)
+  const { task, status, isStandalone, boardId, columnId } = item
   const priority = task.settings?.priority || 'medium'
   const pStyle = priorityStyles[priority] || priorityStyles.medium
-  const dueInfo = formatDueDateShort(task.settings?.dueDate)
+  const isCompleted = !!task.settings?.completed
+  const dueInfo = formatDueDateShort(task.settings?.dueDate, isCompleted)
   const timeAgo = formatTimeAgo(task.createdAt)
 
   // Determine the category tag
@@ -59,7 +62,7 @@ export default function TaskListItem({ item, isSelected, onSelect }) {
         isSelected
           ? 'bg-[#1e212b] border-primary/50 shadow-md shadow-black/20'
           : 'bg-[#161821] border-border hover:bg-[#1e212b] hover:border-border-light'
-      }`}
+      } ${isCompleted ? 'opacity-70' : ''}`}
     >
       {/* Active indicator bar */}
       {isSelected && (
@@ -72,14 +75,22 @@ export default function TaskListItem({ item, isSelected, onSelect }) {
           <div className="mt-0.5">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-border-light bg-transparent text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+              checked={isCompleted}
+              onChange={(e) => {
+                e.stopPropagation()
+                updateTask(boardId, columnId, task.id, {
+                  settings: { ...task.settings, completed: e.target.checked },
+                })
+              }}
               onClick={(e) => e.stopPropagation()}
+              className="h-4 w-4 rounded border-border-light bg-transparent text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
             />
           </div>
 
           <div className="flex-1 min-w-0">
             {/* Task heading */}
             <h3 className={`font-medium truncate text-[15px] mb-1 ${
+              isCompleted ? 'text-text-muted line-through' : 
               isSelected ? 'text-text-primary' : 'text-text-secondary group-hover:text-white'
             } transition-colors`}>
               {task.heading}

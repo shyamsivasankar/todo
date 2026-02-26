@@ -3,6 +3,7 @@ import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { v4 as uuidv4 } from 'uuid'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -97,6 +98,7 @@ export function initializeSchema() {
       priority TEXT DEFAULT 'medium',
       tags TEXT DEFAULT '[]',
       due_date TEXT DEFAULT '',
+      completed INTEGER DEFAULT 0,
       status TEXT NOT NULL,
       position INTEGER NOT NULL,
       created_at TEXT NOT NULL,
@@ -104,6 +106,13 @@ export function initializeSchema() {
       FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
     )
   `)
+
+  // Add completed column if it doesn't exist (for existing databases)
+  const taskTableInfo = db.prepare("PRAGMA table_info(tasks)").all();
+  const hasCompleted = taskTableInfo.some(column => column.name === 'completed');
+  if (!hasCompleted) {
+    db.exec("ALTER TABLE tasks ADD COLUMN completed INTEGER DEFAULT 0");
+  }
 
   // Checklists table
   db.exec(`
@@ -173,6 +182,40 @@ export function initializeSchema() {
     )
   `)
 
+  // Notifications table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL,
+      trigger_type TEXT NOT NULL,
+      sent_at DATETIME NOT NULL,
+      read_at DATETIME,
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )
+  `)
+
+  // Notes table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notes (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `)
+
+  // Task notes table (junction table)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS task_notes (
+      task_id TEXT NOT NULL,
+      note_id TEXT NOT NULL,
+      PRIMARY KEY (task_id, note_id),
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+      FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+    )
+  `)
+
   // Create indexes for better performance
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
@@ -182,7 +225,40 @@ export function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_checklists_task_id ON checklists(task_id);
     CREATE INDEX IF NOT EXISTS idx_attachments_task_id ON attachments(task_id);
     CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_task_id ON notifications(task_id);
+    CREATE INDEX IF NOT EXISTS idx_task_notes_task_id ON task_notes(task_id);
+    CREATE INDEX IF NOT EXISTS idx_task_notes_note_id ON task_notes(note_id);
   `)
+
+  // Run migrations
+  migrateDeadlines()
+}
+
+/**
+ * Migrates existing date-only deadlines to ISO 8601 format by appending T10:00:00Z.
+ */
+function migrateDeadlines() {
+  const db = getDb()
+  const tasks = db.prepare("SELECT id, due_date FROM tasks WHERE due_date IS NOT NULL AND due_date != '' AND due_date NOT LIKE '%T%'").all()
+  
+  if (tasks.length === 0) return
+
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+  let count = 0
+  const updateStmt = db.prepare("UPDATE tasks SET due_date = ? WHERE id = ?")
+  const transaction = db.transaction((tasksToUpdate) => {
+    for (const task of tasksToUpdate) {
+      if (dateRegex.test(task.due_date)) {
+        updateStmt.run(`${task.due_date}T10:00:00Z`, task.id)
+        count++
+      }
+    }
+  })
+  
+  transaction(tasks)
+  if (count > 0) {
+    console.log(`[DB] Migrated ${count} deadlines to ISO 8601 format`)
+  }
 }
 
 // Initialize the schema when database is ready
@@ -230,7 +306,7 @@ export const boardOperations = {
               completed: !!(items.completed)
             })
           }
-        } catch (e) {
+        } catch {
           acc[checklist.task_id].push({
             id: checklist.id,
             text: checklist.title || '',
@@ -294,28 +370,30 @@ export const boardOperations = {
 
     // Add tasks to columns (only tasks with board_id and column_id)
     const standaloneTasks = []
-    tasks.forEach(task => {
-      const taskTimeline = timeline
-        .filter(t => t.task_id === task.id)
-        .map(t => ({
-          timestamp: t.timestamp,
-          action: t.action
-        }))
-
-      const tags = JSON.parse(task.tags || '[]')
-      
-      const taskData = {
-        id: task.id,
-        heading: task.heading,
-        tldr: task.tldr || '',
-        description: task.description || '',
-        createdAt: task.created_at,
-        settings: {
-          priority: task.priority,
-          tags: tags,
-          dueDate: task.due_date || '',
-          status: task.status
-        },
+          tasks.forEach(task => {
+            const taskTimeline = timeline
+              .filter(t => t.task_id === task.id)
+              .map(t => ({
+                timestamp: t.timestamp,
+                action: t.action
+              }))
+    
+            const tags = JSON.parse(task.tags || '[]')
+            
+            const taskData = {
+              id: task.id,
+              heading: task.heading,
+              tldr: task.tldr || '',
+              description: task.description || '',
+              completed: !!task.completed,
+              createdAt: task.created_at,
+              settings: {
+                priority: task.priority,
+                tags: tags,
+                dueDate: task.due_date || '',
+                status: task.status
+              },
+    
         extendedData: {
           checklists: checklistsByTask[task.id] || [],
           attachments: attachmentsByTask[task.id] || [],
@@ -380,8 +458,8 @@ export const boardOperations = {
         const insertTask = db.prepare(`
           INSERT INTO tasks (
             id, board_id, column_id, heading, tldr, description, 
-            priority, tags, due_date, status, position, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            priority, tags, due_date, completed, status, position, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         const insertTimeline = db.prepare('INSERT INTO task_timeline (task_id, timestamp, action) VALUES (?, ?, ?)')
         const insertChecklist = db.prepare('INSERT INTO checklists (id, task_id, title, items) VALUES (?, ?, ?, ?)')
@@ -423,6 +501,7 @@ export const boardOperations = {
                     task.settings?.priority || 'medium',
                     tagsJson,
                     task.settings?.dueDate || '',
+                    task.completed ? 1 : 0,
                     task.settings?.status || column.title,
                     taskIndex,
                     task.createdAt || new Date().toISOString()
@@ -487,6 +566,7 @@ export const boardOperations = {
               task.settings?.priority || 'medium',
               tagsJson,
               task.settings?.dueDate || '',
+              task.completed ? 1 : 0,
               task.settings?.status || 'To Do',
               taskIndex,
               task.createdAt || new Date().toISOString()
@@ -495,7 +575,13 @@ export const boardOperations = {
             // Insert checklists and attachments for standalone tasks
             if (task.extendedData?.checklists) {
               task.extendedData.checklists.forEach(checklist => {
-                insertChecklist.run(checklist.id, task.id, checklist.title, JSON.stringify(checklist.items || []))
+                // Fix: Use correct properties from store (text and completed)
+                insertChecklist.run(
+                  checklist.id, 
+                  task.id, 
+                  checklist.text || '', 
+                  JSON.stringify({ completed: !!checklist.completed })
+                )
               })
             }
             if (task.extendedData?.attachments) {
@@ -531,7 +617,7 @@ export const boardOperations = {
 export const taskOperations = {
   create: (taskData) => {
     const db = getDb()
-    const { id, board_id, column_id, heading, tldr, description, priority, tags, extendedData, due_date, status, position, created_at } = taskData;
+    const { id, board_id, column_id, heading, tldr, description, priority, tags, extendedData, due_date, completed, status, position, created_at } = taskData;
     
     const transaction = db.transaction(() => {
       // Make space for the new task by incrementing positions of existing tasks
@@ -543,14 +629,16 @@ export const taskOperations = {
       const tagsJson = JSON.stringify(tags || [])
       
       const stmt = db.prepare(`
-        INSERT INTO tasks (id, board_id, column_id, heading, tldr, description, priority, tags, due_date, status, position, created_at)
-        VALUES (@id, @board_id, @column_id, @heading, @tldr, @description, @priority, @tags, @due_date, @status, @position, @created_at)
+        INSERT INTO tasks (id, board_id, column_id, heading, tldr, description, priority, tags, due_date, completed, status, position, created_at)
+        VALUES (@id, @board_id, @column_id, @heading, @tldr, @description, @priority, @tags, @due_date, @completed, @status, @position, @created_at)
       `)
       
       stmt.run({
         id, board_id, column_id, heading, tldr, description, priority, 
         tags: tagsJson,
-        due_date, status, position, created_at
+        due_date, 
+        completed: completed ? 1 : 0,
+        status, position, created_at
       })
 
       // Create checklists and attachments
@@ -780,6 +868,158 @@ export const deletedTasksOperations = {
     })
 
     transaction()
+  }
+}
+
+// Notification operations
+export const notificationOperations = {
+  getAll: () => {
+    const db = getDb()
+    return db.prepare(`
+      SELECT n.*, t.heading as task_title 
+      FROM notifications n
+      JOIN tasks t ON n.task_id = t.id
+      ORDER BY n.sent_at DESC
+    `).all()
+  },
+
+  markAsRead: (notificationId) => {
+    const db = getDb()
+    db.prepare('UPDATE notifications SET read_at = ? WHERE id = ?')
+      .run(new Date().toISOString(), notificationId)
+  },
+
+  create: (taskId, triggerType) => {
+    const db = getDb()
+    return db.prepare('INSERT INTO notifications (task_id, trigger_type, sent_at) VALUES (?, ?, ?)')
+      .run(taskId, triggerType, new Date().toISOString())
+  },
+
+  hasBeenSent: (taskId, triggerType) => {
+    const db = getDb()
+    const result = db.prepare('SELECT id FROM notifications WHERE task_id = ? AND trigger_type = ?')
+      .get(taskId, triggerType)
+    return !!result
+  }
+}
+
+// Note operations
+export const noteOperations = {
+  getAll: () => {
+    const db = getDb()
+    const notes = db.prepare('SELECT * FROM notes ORDER BY updated_at DESC').all()
+    const taskNotes = db.prepare('SELECT * FROM task_notes').all()
+
+    const taskNotesMap = taskNotes.reduce((acc, tn) => {
+      if (!acc[tn.note_id]) acc[tn.note_id] = []
+      acc[tn.note_id].push(tn.task_id)
+      return acc
+    }, {})
+
+    return notes.map(note => ({
+      id: note.id,
+      title: note.title,
+      content: note.content,
+      createdAt: note.created_at,
+      updatedAt: note.updated_at,
+      taskIds: taskNotesMap[note.id] || []
+    }))
+  },
+
+  saveAll: (notes) => {
+    const db = getDb()
+    const transaction = db.transaction(() => {
+      // Clear existing notes and links
+      db.prepare('DELETE FROM task_notes').run()
+      db.prepare('DELETE FROM notes').run()
+
+      const insertNote = db.prepare(`
+        INSERT INTO notes (id, title, content, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+      `)
+      const insertTaskNote = db.prepare(`
+        INSERT INTO task_notes (task_id, note_id)
+        VALUES (?, ?)
+      `)
+
+      notes.forEach(note => {
+        insertNote.run(note.id, note.title, note.content, note.createdAt, note.updatedAt)
+        if (note.taskIds && Array.isArray(note.taskIds)) {
+          note.taskIds.forEach(taskId => {
+            insertTaskNote.run(taskId, note.id)
+          })
+        }
+      })
+    })
+    transaction()
+  },
+
+  create: (note) => {
+    const db = getDb()
+    const transaction = db.transaction(() => {
+      db.prepare(`
+        INSERT INTO notes (id, title, content, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(note.id, note.title, note.content, note.createdAt, note.updatedAt)
+
+      if (note.taskIds && Array.isArray(note.taskIds)) {
+        const insertTaskNote = db.prepare('INSERT INTO task_notes (task_id, note_id) VALUES (?, ?)')
+        note.taskIds.forEach(taskId => {
+          insertTaskNote.run(taskId, note.id)
+        })
+      }
+    })
+    transaction()
+  },
+
+  update: (id, updates) => {
+    const db = getDb()
+    const transaction = db.transaction(() => {
+      const fields = []
+      const values = []
+
+      if (updates.title !== undefined) {
+        fields.push('title = ?')
+        values.push(updates.title)
+      }
+      if (updates.content !== undefined) {
+        fields.push('content = ?')
+        values.push(updates.content)
+      }
+      if (updates.updatedAt !== undefined) {
+        fields.push('updated_at = ?')
+        values.push(updates.updatedAt)
+      }
+
+      if (fields.length > 0) {
+        values.push(id)
+        db.prepare(`UPDATE notes SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+      }
+
+      if (updates.taskIds !== undefined) {
+        db.prepare('DELETE FROM task_notes WHERE note_id = ?').run(id)
+        const insertTaskNote = db.prepare('INSERT INTO task_notes (task_id, note_id) VALUES (?, ?)')
+        updates.taskIds.forEach(taskId => {
+          insertTaskNote.run(taskId, id)
+        })
+      }
+    })
+    transaction()
+  },
+
+  delete: (id) => {
+    const db = getDb()
+    db.prepare('DELETE FROM notes WHERE id = ?').run(id)
+  },
+
+  linkToTask: (noteId, taskId) => {
+    const db = getDb()
+    db.prepare('INSERT OR IGNORE INTO task_notes (task_id, note_id) VALUES (?, ?)').run(taskId, noteId)
+  },
+
+  unlinkFromTask: (noteId, taskId) => {
+    const db = getDb()
+    db.prepare('DELETE FROM task_notes WHERE task_id = ? AND note_id = ?').run(taskId, noteId)
   }
 }
 

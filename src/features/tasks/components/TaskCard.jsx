@@ -1,5 +1,6 @@
 import { useDraggable } from '@dnd-kit/core'
-import { Calendar, CheckCircle2, Clock, Pencil } from 'lucide-react'
+import { Calendar, CheckCircle2, Clock, Pencil, X } from 'lucide-react'
+import { useStore } from '../../../store/useStore'
 
 const priorityBadges = {
   high: {
@@ -16,15 +17,15 @@ const priorityBadges = {
   },
 }
 
-function formatDueDate(dateStr) {
+function formatDueDate(dateStr, isCompleted = false) {
   if (!dateStr) return null
   const due = new Date(dateStr)
   const now = new Date()
   const diffMs = due - now
   const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
 
-  if (diffDays < 0) return { text: 'Overdue', urgent: true }
-  if (diffDays === 0) return { text: 'Due Today', urgent: true }
+  if (!isCompleted && diffDays < 0) return { text: 'Overdue', urgent: true }
+  if (diffDays === 0) return { text: 'Due Today', urgent: !isCompleted }
   if (diffDays === 1) return { text: 'Tomorrow', urgent: false }
   if (diffDays <= 7) return { text: `${diffDays} days`, urgent: false }
 
@@ -35,6 +36,7 @@ function formatDueDate(dateStr) {
 }
 
 export default function TaskCard({ boardId, columnId, task, isDone = false, onOpen, isOverlay = false }) {
+  const updateTask = useStore((state) => state.updateTask)
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
     disabled: isOverlay,
@@ -61,7 +63,8 @@ export default function TaskCard({ boardId, columnId, task, isDone = false, onOp
 
   const priority = task.settings?.priority || 'medium'
   const badge = priorityBadges[priority] || priorityBadges.medium
-  const dueInfo = formatDueDate(task.settings?.dueDate)
+  const isCompleted = !!task.settings?.completed || isDone
+  const dueInfo = formatDueDate(task.settings?.dueDate, isCompleted)
   const tagList = task.settings?.tags || []
 
   return (
@@ -72,21 +75,36 @@ export default function TaskCard({ boardId, columnId, task, isDone = false, onOp
         !isOverlay && isDragging
           ? 'cursor-grabbing opacity-70 bg-surface/80 border-primary/50'
           : 'cursor-grab bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10 glass-card'
-        }`}
+        } ${isCompleted ? 'opacity-75' : ''}`}
       {...(!isOverlay ? attributes : {})}
       {...(!isOverlay ? listeners : {})}
     >
       {/* Priority badge + edit button */}
       <div className="flex justify-between items-start mb-2">
-        <span className={`inline-block rounded px-2 py-1 text-[10px] font-bold tracking-wide uppercase ${badge.className}`}>
-          {badge.label}
-        </span>
-        {isDone && (
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={isCompleted}
+            onChange={(e) => {
+              e.stopPropagation()
+              updateTask(boardId, columnId, task.id, {
+                settings: { ...task.settings, completed: e.target.checked },
+              })
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="h-4 w-4 rounded border-white/20 bg-transparent text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0 cursor-pointer"
+          />
+          <span className={`inline-block rounded px-2 py-1 text-[10px] font-bold tracking-wide uppercase ${badge.className}`}>
+            {badge.label}
+          </span>
+        </div>
+        {isCompleted && (
           <CheckCircle2 className="h-5 w-5 text-emerald-500" />
         )}
-        {!isDone && (
+        {!isCompleted && (
           <button
             type="button"
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
               onOpen()
@@ -99,12 +117,20 @@ export default function TaskCard({ boardId, columnId, task, isDone = false, onOp
       </div>
 
       {/* Task heading */}
-      <button type="button" onClick={onOpen} className="w-full text-left">
-        <h3 className={`font-semibold mb-1 ${isDone ? 'text-text-muted line-through' : 'text-text-primary'}`}>
+      <button
+        type="button"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation()
+          onOpen()
+        }}
+        className="w-full text-left"
+      >
+        <h3 className={`font-semibold mb-1 ${isCompleted ? 'text-text-muted line-through' : 'text-text-primary'}`}>
           {task.heading}
         </h3>
         {task.tldr && (
-          <p className={`text-xs mb-4 line-clamp-2 ${isDone ? 'text-text-muted/60' : 'text-text-muted'}`}>
+          <p className={`text-xs mb-4 line-clamp-2 ${isCompleted ? 'text-text-muted/60' : 'text-text-muted'}`}>
             {task.tldr}
           </p>
         )}
@@ -116,9 +142,22 @@ export default function TaskCard({ boardId, columnId, task, isDone = false, onOp
           {tagList.map((tag) => (
             <span
               key={tag}
-              className="rounded bg-surface-light px-2 py-0.5 text-[10px] text-text-muted"
+              className="group relative rounded bg-surface-light px-2 py-0.5 text-[10px] text-text-muted transition-all hover:pr-5"
             >
               #{tag}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const nextTags = tagList.filter((t) => t !== tag)
+                  updateTask(boardId, columnId, task.id, {
+                    settings: { ...task.settings, tags: nextTags },
+                  })
+                }}
+                className="absolute right-0.5 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-text-muted/50 opacity-0 transition-all hover:bg-white/10 hover:text-white group-hover:opacity-100"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
             </span>
           ))}
         </div>
