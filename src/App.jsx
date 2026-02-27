@@ -114,15 +114,6 @@ function App() {
     hasLoadedRef.current = true
 
     const loadBoards = async () => {
-      const hydrationTimeout = setTimeout(() => {
-        if (!useStore.getState().hydrationComplete) {
-          hydrateBoards([], null, [])
-          hydrateDeletedTasks([])
-          hydrateSettings({})
-          hydrateNotes([])
-        }
-      }, 1000)
-
       try {
         let boardsData = { boards: [], activeBoardId: null }
         let diskDeletedTasks = []
@@ -170,9 +161,10 @@ function App() {
         }
 
         attachBoardPersistence()
-        clearTimeout(hydrationTimeout)
       } catch (error) {
         console.error('[App] Error loading boards:', error)
+        // If loading failed completely and we haven't hydrated yet,
+        // we should still allow the app to function with empty state.
         if (!useStore.getState().hydrationComplete) {
           hydrateBoards([], null, [])
           hydrateDeletedTasks([])

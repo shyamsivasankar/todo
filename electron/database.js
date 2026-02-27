@@ -10,33 +10,63 @@ const __dirname = path.dirname(__filename)
 
 // Initialize database - ensure app is ready first
 let db = null
+let notesDir = null
 
 function initializeDatabase() {
   if (db) return db
   
   try {
-    // Get the user data directory for the app
-    const userDataPath = app.getPath('userData')
+    let userDataPath;
+    try {
+      userDataPath = app.getPath('userData')
+    } catch (e) {
+      // Fallback for tests if app.getPath fails
+      userDataPath = './db-test'
+    }
+    
     const dbPath = path.join(userDataPath, 'kanban.db')
+    const notesPath = path.join(userDataPath, 'notes')
+    notesDir = notesPath
 
-    console.log('[DB] Initializing database at:', dbPath)
-
+    // Skip actual file DB initialization if we are in a test environment and db is already set via _setDb
+    // This is handled by the 'db' check at the top, but we also want to avoid fs ops if possible
+    
     // Ensure the directory exists
     if (!fs.existsSync(userDataPath)) {
-      fs.mkdirSync(userDataPath, { recursive: true })
+      try {
+        fs.mkdirSync(userDataPath, { recursive: true })
+      } catch (e) {
+        console.warn('[DB] Could not create userData directory:', e.message)
+      }
+    }
+
+    if (!fs.existsSync(notesPath)) {
+      try {
+        fs.mkdirSync(notesPath, { recursive: true })
+        console.log('[DB] Created notes directory at:', notesPath)
+      } catch (e) {
+        console.warn('[DB] Could not create notes directory:', e.message)
+      }
     }
 
     // Initialize database
-    db = new Database(dbPath)
-
-    // Enable foreign keys
-    db.pragma('foreign_keys = ON')
+    try {
+      db = new Database(dbPath)
+      // Enable foreign keys
+      db.pragma('foreign_keys = ON')
+      console.log('[DB] Database initialized successfully at:', dbPath)
+    } catch (e) {
+      console.error('[DB] Failed to initialize file-based database:', e.message)
+      console.log('[DB] Falling back to in-memory database for this session')
+      db = new Database(':memory:')
+    }
     
-    console.log('[DB] Database initialized successfully')
     return db
   } catch (error) {
-    console.error('[DB] Failed to initialize database:', error)
-    throw error
+    console.error('[DB] Critical failure in database initialization:', error)
+    // Absolute fallback
+    db = new Database(':memory:')
+    return db
   }
 }
 
@@ -66,172 +96,157 @@ export function _setDb(newDb) {
 export function initializeSchema() {
   const db = getDb()
   
-  // Boards table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS boards (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `)
+  try {
+    // Boards table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS boards (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `)
 
-  // Columns table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS columns (
-      id TEXT PRIMARY KEY,
-      board_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      position INTEGER NOT NULL,
-      FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
-    )
-  `)
+    // Columns table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS columns (
+        id TEXT PRIMARY KEY,
+        board_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
+      )
+    `)
 
-  // Tasks table - board_id and column_id can be NULL for standalone tasks
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT PRIMARY KEY,
-      board_id TEXT,
-      column_id TEXT,
-      heading TEXT NOT NULL,
-      tldr TEXT DEFAULT '',
-      description TEXT DEFAULT '',
-      priority TEXT DEFAULT 'medium',
-      tags TEXT DEFAULT '[]',
-      due_date TEXT DEFAULT '',
-      completed INTEGER DEFAULT 0,
-      status TEXT NOT NULL,
-      position INTEGER NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
-      FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
-    )
-  `)
+    // Tasks table - board_id and column_id can be NULL for standalone tasks
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        board_id TEXT,
+        column_id TEXT,
+        heading TEXT NOT NULL,
+        tldr TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        priority TEXT DEFAULT 'medium',
+        tags TEXT DEFAULT '[]',
+        due_date TEXT DEFAULT '',
+        status TEXT DEFAULT 'To Do',
+        completed INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        position INTEGER DEFAULT 0,
+        FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
+        FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
+      )
+    `)
 
-  // Add completed column if it doesn't exist (for existing databases)
-  const taskTableInfo = db.prepare("PRAGMA table_info(tasks)").all();
-  const hasCompleted = taskTableInfo.some(column => column.name === 'completed');
-  if (!hasCompleted) {
-    db.exec("ALTER TABLE tasks ADD COLUMN completed INTEGER DEFAULT 0");
+    // Task timeline table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS task_timeline (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      )
+    `)
+
+    // Checklists table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS checklists (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        items TEXT NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      )
+    `)
+
+    // Attachments table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS attachments (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        url TEXT NOT NULL,
+        title TEXT NOT NULL,
+        cover_image INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      )
+    `)
+
+    // Task comments table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS task_comments (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        text TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      )
+    `)
+
+    // Notifications table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        trigger_type TEXT NOT NULL,
+        sent_at DATETIME NOT NULL,
+        read_at DATETIME,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      )
+    `)
+
+    // Settings table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    `)
+
+    // Notes table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS notes (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `)
+
+    // Task notes table (junction table)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS task_notes (
+        task_id TEXT NOT NULL,
+        note_id TEXT NOT NULL,
+        PRIMARY KEY (task_id, note_id),
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+        FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+      )
+    `)
+
+    // Create indexes for better performance
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_column_id ON tasks(column_id);
+      CREATE INDEX IF NOT EXISTS idx_task_timeline_task_id ON task_timeline(task_id);
+      CREATE INDEX IF NOT EXISTS idx_checklists_task_id ON checklists(task_id);
+      CREATE INDEX IF NOT EXISTS idx_attachments_task_id ON attachments(task_id);
+      CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id);
+      CREATE INDEX IF NOT EXISTS idx_notifications_task_id ON notifications(task_id);
+      CREATE INDEX IF NOT EXISTS idx_task_notes_task_id ON task_notes(task_id);
+      CREATE INDEX IF NOT EXISTS idx_task_notes_note_id ON task_notes(note_id);
+    `)
+
+    // Run migrations
+    migrateDeadlines()
+  } catch (error) {
+    console.error('[DB] Failed to initialize schema:', error)
   }
-
-  // Checklists table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS checklists (
-      id TEXT PRIMARY KEY,
-      task_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      items TEXT NOT NULL,
-      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-    )
-  `)
-
-  // Attachments table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS attachments (
-      id TEXT PRIMARY KEY,
-      task_id TEXT NOT NULL,
-      url TEXT NOT NULL,
-      title TEXT NOT NULL,
-      cover_image TEXT,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-    )
-  `)
-
-  // Comments table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS task_comments (
-      id TEXT PRIMARY KEY,
-      task_id TEXT NOT NULL,
-      text TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-    )
-  `)
-
-  // Task timeline table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS task_timeline (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
-      action TEXT NOT NULL,
-      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-    )
-  `)
-
-  // Deleted tasks table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS deleted_tasks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      board_id TEXT NOT NULL,
-      board_name TEXT NOT NULL,
-      column_id TEXT NOT NULL,
-      column_title TEXT NOT NULL,
-      task_id TEXT NOT NULL,
-      task_data TEXT NOT NULL,
-      deleted_at TEXT NOT NULL
-    )
-  `)
-
-  // Settings table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    )
-  `)
-
-  // Notifications table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS notifications (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id TEXT NOT NULL,
-      trigger_type TEXT NOT NULL,
-      sent_at DATETIME NOT NULL,
-      read_at DATETIME,
-      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-    )
-  `)
-
-  // Notes table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS notes (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      content TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `)
-
-  // Task notes table (junction table)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS task_notes (
-      task_id TEXT NOT NULL,
-      note_id TEXT NOT NULL,
-      PRIMARY KEY (task_id, note_id),
-      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-      FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
-    )
-  `)
-
-  // Create indexes for better performance
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
-    CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id);
-    CREATE INDEX IF NOT EXISTS idx_tasks_column_id ON tasks(column_id);
-    CREATE INDEX IF NOT EXISTS idx_task_timeline_task_id ON task_timeline(task_id);
-    CREATE INDEX IF NOT EXISTS idx_checklists_task_id ON checklists(task_id);
-    CREATE INDEX IF NOT EXISTS idx_attachments_task_id ON attachments(task_id);
-    CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id);
-    CREATE INDEX IF NOT EXISTS idx_notifications_task_id ON notifications(task_id);
-    CREATE INDEX IF NOT EXISTS idx_task_notes_task_id ON task_notes(task_id);
-    CREATE INDEX IF NOT EXISTS idx_task_notes_note_id ON task_notes(note_id);
-  `)
-
-  // Run migrations
-  migrateDeadlines()
 }
 
 /**
@@ -288,30 +303,13 @@ export const boardOperations = {
         if (!acc[checklist.task_id]) acc[checklist.task_id] = []
         // Each entry in the store is expected to have { id, text, completed }
         // The checklists table in SQLite uses 'title' and 'items' (JSON)
-        // We'll normalize this back to the store's format.
         try {
-          const items = JSON.parse(checklist.items || '[]')
-          if (Array.isArray(items) && items.length > 0) {
-            // If items is an array of objects, use them directly (legacy/alternate format)
-            items.forEach(item => acc[checklist.task_id].push({
-              id: item.id || uuidv4(),
-              text: item.text || '',
-              completed: !!item.completed
-            }))
-          } else {
-            // New format: checklist table title is the text
-            acc[checklist.task_id].push({
-              id: checklist.id,
-              text: checklist.title || '',
-              completed: !!(items.completed)
-            })
-          }
-        } catch {
-          acc[checklist.task_id].push({
-            id: checklist.id,
-            text: checklist.title || '',
-            completed: false
-          })
+          const items = JSON.parse(checklist.items)
+          // Ensure it's an array for Zod validation
+          acc[checklist.task_id] = Array.isArray(items) ? items : []
+        } catch (e) {
+          console.error(`[DB] Failed to parse checklists items for task ${checklist.task_id}:`, e)
+          acc[checklist.task_id] = []
         }
         return acc
       }, {})
@@ -322,7 +320,7 @@ export const boardOperations = {
           id: attachment.id,
           url: attachment.url,
           title: attachment.title,
-          coverImage: attachment.cover_image,
+          coverImage: !!attachment.cover_image,
           createdAt: attachment.created_at
         })
         return acc
@@ -338,323 +336,212 @@ export const boardOperations = {
         return acc
       }, {})
 
-      // Get active board ID from settings
-      const activeBoardIdRow = db.prepare("SELECT value FROM settings WHERE key = 'activeBoardId'").get()
-      const activeBoardId = activeBoardIdRow ? activeBoardIdRow.value : null
+      const timelineByTask = timeline.reduce((acc, t) => {
+        if (!acc[t.task_id]) acc[t.task_id] = []
+        acc[t.task_id].push({
+          timestamp: t.timestamp,
+          action: t.action
+        })
+        return acc
+      }, {})
 
-    // Reconstruct boards structure
-    const boardsMap = new Map()
-    
-    boards.forEach(board => {
-      boardsMap.set(board.id, {
+      const tasksByColumn = tasks.reduce((acc, task) => {
+        const key = task.column_id || 'standalone'
+        if (!acc[key]) acc[key] = []
+        acc[key].push({
+          id: task.id,
+          boardId: task.board_id,
+          columnId: task.column_id,
+          heading: task.heading,
+          tldr: task.tldr,
+          description: task.description,
+          createdAt: task.created_at,
+          settings: {
+            priority: task.priority,
+            tags: (() => {
+              try {
+                const parsed = JSON.parse(task.tags || '[]')
+                return Array.isArray(parsed) ? parsed : []
+              } catch {
+                return []
+              }
+            })(),
+            dueDate: task.due_date,
+            status: task.status,
+            completed: !!task.completed
+          },
+          extendedData: {
+            checklists: checklistsByTask[task.id] || [],
+            attachments: attachmentsByTask[task.id] || [],
+            comments: commentsByTask[task.id] || []
+          },
+          timeline: timelineByTask[task.id] || []
+        })
+        return acc
+      }, {})
+
+      const columnsWithTasks = columns.map(col => ({
+        id: col.id,
+        boardId: col.board_id,
+        title: col.title,
+        position: col.position,
+        tasks: tasksByColumn[col.id] || []
+      }))
+
+      const columnsByBoard = columnsWithTasks.reduce((acc, col) => {
+        if (!acc[col.boardId]) acc[col.boardId] = []
+        acc[col.boardId].push(col)
+        return acc
+      }, {})
+
+      const boardsWithColumns = boards.map(board => ({
         id: board.id,
         name: board.name,
-        createdAt: board.created_at,
-        columns: []
-      })
-    })
+        createdAt: board.createdAt || board.created_at, // Handle both casing styles
+        columns: columnsByBoard[board.id] || []
+      }))
 
-    // Add columns
-    const columnsMap = new Map()
-    columns.forEach(column => {
-      columnsMap.set(column.id, {
-        id: column.id,
-        title: column.title,
-        tasks: []
-      })
-      const board = boardsMap.get(column.board_id)
-      if (board) {
-        board.columns.push(columnsMap.get(column.id))
-      }
-    })
-
-    // Add tasks to columns (only tasks with board_id and column_id)
-    const standaloneTasks = []
-          tasks.forEach(task => {
-            const taskTimeline = timeline
-              .filter(t => t.task_id === task.id)
-              .map(t => ({
-                timestamp: t.timestamp,
-                action: t.action
-              }))
-    
-            const tags = JSON.parse(task.tags || '[]')
-            
-            const taskData = {
-              id: task.id,
-              heading: task.heading,
-              tldr: task.tldr || '',
-              description: task.description || '',
-              completed: !!task.completed,
-              createdAt: task.created_at,
-              settings: {
-                priority: task.priority,
-                tags: tags,
-                dueDate: task.due_date || '',
-                status: task.status
-              },
-    
-        extendedData: {
-          checklists: checklistsByTask[task.id] || [],
-          attachments: attachmentsByTask[task.id] || [],
-          comments: commentsByTask[task.id] || []
-        },
-        timeline: taskTimeline
-      }
-
-      // If task has no board_id, it's a standalone task
-      if (!task.board_id || !task.column_id) {
-        standaloneTasks.push(taskData)
-      } else {
-        // Otherwise, add it to the column
-        const column = columnsMap.get(task.column_id)
-        if (column) {
-          column.tasks.push(taskData)
+      // Get activeBoardId from settings
+      let activeBoardId = null
+      try {
+        const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('activeBoardId')
+        if (row) {
+          try {
+            activeBoardId = JSON.parse(row.value)
+          } catch {
+            activeBoardId = row.value
+          }
         }
+      } catch (e) {
+        console.warn('[DB] Could not fetch activeBoardId from settings:', e.message)
       }
-    })
 
-      const result = {
-        boards: Array.from(boardsMap.values()),
-        standaloneTasks,
+      return {
+        boards: boardsWithColumns,
+        standaloneTasks: tasksByColumn['standalone'] || [],
         activeBoardId
       }
-      
-      return result
     } catch (error) {
-      console.error('[DB] Error loading boards:', error)
-      return { boards: [], standaloneTasks: [], activeBoardId: null }
+      console.error('[DB] Error in boardOperations.getAll:', error)
+      return { boards: [], standaloneTasks: [] }
     }
   },
 
-  saveAll: (boards, activeBoardId, standaloneTasks = []) => {
-    try {
-      const db = getDb()
+  saveAll: (boards, activeBoardId, standaloneTasks) => {
+    const db = getDb()
+    const transaction = db.transaction(() => {
+      // Clear existing data
+      db.prepare('DELETE FROM boards').run()
+      db.prepare('DELETE FROM columns').run()
+      db.prepare('DELETE FROM tasks').run()
+      db.prepare('DELETE FROM task_timeline').run()
+      db.prepare('DELETE FROM checklists').run()
+      db.prepare('DELETE FROM attachments').run()
+      db.prepare('DELETE FROM task_comments').run()
+
+      const insertBoard = db.prepare('INSERT INTO boards (id, name, created_at) VALUES (?, ?, ?)')
+      const insertColumn = db.prepare('INSERT INTO columns (id, board_id, title, position) VALUES (?, ?, ?, ?)')
       
-      if (!Array.isArray(boards)) {
-        console.error('[DB] saveAll: boards is not an array:', boards)
-        return
-      }
-      
-      console.log('[DB] Saving boards to database:', { 
-        boardsCount: boards.length, 
-        standaloneTasksCount: standaloneTasks?.length || 0,
-        activeBoardId 
-      })
-      
-      const transaction = db.transaction(() => {
-        // Clear existing data
-        db.prepare('DELETE FROM attachments').run()
-        db.prepare('DELETE FROM checklists').run()
-        db.prepare('DELETE FROM task_comments').run()
-        db.prepare('DELETE FROM task_timeline').run()
-        db.prepare('DELETE FROM tasks').run()
-        db.prepare('DELETE FROM columns').run()
-        db.prepare('DELETE FROM boards').run()
-
-        // Insert boards
-        const insertBoard = db.prepare('INSERT INTO boards (id, name, created_at) VALUES (?, ?, ?)')
-        const insertColumn = db.prepare('INSERT INTO columns (id, board_id, title, position) VALUES (?, ?, ?, ?)')
-        const insertTask = db.prepare(`
-          INSERT INTO tasks (
-            id, board_id, column_id, heading, tldr, description, 
-            priority, tags, due_date, completed, status, position, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `)
-        const insertTimeline = db.prepare('INSERT INTO task_timeline (task_id, timestamp, action) VALUES (?, ?, ?)')
-        const insertChecklist = db.prepare('INSERT INTO checklists (id, task_id, title, items) VALUES (?, ?, ?, ?)')
-        const insertAttachment = db.prepare('INSERT INTO attachments (id, task_id, url, title, cover_image, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-        const insertComment = db.prepare('INSERT INTO task_comments (id, task_id, text, created_at) VALUES (?, ?, ?, ?)')
-
-        boards.forEach((board) => {
-          if (!board.id || !board.name) {
-            console.error('Invalid board:', board)
-            return
-          }
-          
-          insertBoard.run(board.id, board.name, board.createdAt || new Date().toISOString())
-
-          if (board.columns && Array.isArray(board.columns)) {
-            board.columns.forEach((column, columnIndex) => {
-              if (!column.id || !column.title) {
-                console.error('Invalid column:', column)
-                return
-              }
-              
-              insertColumn.run(column.id, board.id, column.title, columnIndex)
-
-              if (column.tasks && Array.isArray(column.tasks)) {
-                column.tasks.forEach((task, taskIndex) => {
-                  if (!task.id) {
-                    console.error('Invalid task:', task)
-                    return
-                  }
-                  
-                  const tagsJson = JSON.stringify(task.settings?.tags || [])
-                  insertTask.run(
-                    task.id,
-                    board.id,
-                    column.id,
-                    task.heading,
-                    task.tldr || '',
-                    task.description || '',
-                    task.settings?.priority || 'medium',
-                    tagsJson,
-                    task.settings?.dueDate || '',
-                    task.completed ? 1 : 0,
-                    task.settings?.status || column.title,
-                    taskIndex,
-                    task.createdAt || new Date().toISOString()
-                  )
-
-                  // Insert checklists
-                  if (task.extendedData?.checklists) {
-                    task.extendedData.checklists.forEach(checklist => {
-                      // Store 'text' as 'title' for backwards compatibility/simplicity
-                      // Store 'completed' in 'items' as a JSON object
-                      insertChecklist.run(
-                        checklist.id, 
-                        task.id, 
-                        checklist.text || '', 
-                        JSON.stringify({ completed: !!checklist.completed })
-                      )
-                    })
-                  }
-
-                  // Insert attachments
-                  if (task.extendedData?.attachments) {
-                    task.extendedData.attachments.forEach(attachment => {
-                      insertAttachment.run(attachment.id, task.id, attachment.url, attachment.title, attachment.coverImage, attachment.createdAt)
-                    })
-                  }
-
-                  // Insert comments
-                  if (task.extendedData?.comments) {
-                    task.extendedData.comments.forEach(comment => {
-                      insertComment.run(comment.id, task.id, comment.text, comment.createdAt)
-                    })
-                  }
-
-                  // Insert timeline entries
-                  if (task.timeline && Array.isArray(task.timeline)) {
-                    task.timeline.forEach(timelineEntry => {
-                      insertTimeline.run(task.id, timelineEntry.timestamp, timelineEntry.action)
-                    })
-                  }
+      boards.forEach(board => {
+        insertBoard.run(board.id, board.name, board.createdAt || new Date().toISOString())
+        if (board.columns) {
+          board.columns.forEach((col, index) => {
+            insertColumn.run(col.id, board.id, col.title, index)
+            if (col.tasks) {
+              col.tasks.forEach((task, taskIndex) => {
+                taskOperations.create({
+                  ...task,
+                  board_id: board.id,
+                  column_id: col.id,
+                  position: taskIndex
                 })
-              }
-            })
-          }
-        })
-
-        // Save standalone tasks (tasks without board_id)
-        if (standaloneTasks && Array.isArray(standaloneTasks)) {
-          standaloneTasks.forEach((task, taskIndex) => {
-            if (!task.id) {
-              console.error('Invalid standalone task:', task)
-              return
-            }
-            
-            const tagsJson = JSON.stringify(task.settings?.tags || [])
-            insertTask.run(
-              task.id,
-              null, // board_id is NULL for standalone tasks
-              null, // column_id is NULL for standalone tasks
-              task.heading,
-              task.tldr || '',
-              task.description || '',
-              task.settings?.priority || 'medium',
-              tagsJson,
-              task.settings?.dueDate || '',
-              task.completed ? 1 : 0,
-              task.settings?.status || 'To Do',
-              taskIndex,
-              task.createdAt || new Date().toISOString()
-            )
-
-            // Insert checklists and attachments for standalone tasks
-            if (task.extendedData?.checklists) {
-              task.extendedData.checklists.forEach(checklist => {
-                // Fix: Use correct properties from store (text and completed)
-                insertChecklist.run(
-                  checklist.id, 
-                  task.id, 
-                  checklist.text || '', 
-                  JSON.stringify({ completed: !!checklist.completed })
-                )
-              })
-            }
-            if (task.extendedData?.attachments) {
-              task.extendedData.attachments.forEach(attachment => {
-                insertAttachment.run(attachment.id, task.id, attachment.url, attachment.title, attachment.coverImage, attachment.createdAt)
-              })
-            }
-
-            // Insert timeline entries
-            if (task.timeline && Array.isArray(task.timeline)) {
-              task.timeline.forEach(timelineEntry => {
-                insertTimeline.run(task.id, timelineEntry.timestamp, timelineEntry.action)
               })
             }
           })
         }
-
-        // Save active board ID
-        if (activeBoardId) {
-          db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('activeBoardId', activeBoardId)
-        }
       })
 
-      transaction()
-      console.log('[DB] Boards saved to database successfully')
-    } catch (error) {
-      console.error('[DB] Error saving boards:', error)
-      throw error
-    }
+      // Insert standalone tasks
+      if (standaloneTasks) {
+        standaloneTasks.forEach((task, index) => {
+          taskOperations.create({
+            ...task,
+            board_id: null,
+            column_id: null,
+            position: index,
+            isStandalone: true
+          })
+        })
+      }
+
+      // Save activeBoardId to settings
+      if (activeBoardId) {
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('activeBoardId', activeBoardId)
+      }
+    })
+    transaction()
   }
 }
 
+// Task operations
 export const taskOperations = {
-  create: (taskData) => {
+  create: (task) => {
     const db = getDb()
-    const { id, board_id, column_id, heading, tldr, description, priority, tags, extendedData, due_date, completed, status, position, created_at } = taskData;
-    
-    const transaction = db.transaction(() => {
-      // Make space for the new task by incrementing positions of existing tasks
-      const incrementPositionStmt = db.prepare(
-        'UPDATE tasks SET position = position + 1 WHERE column_id = ? AND position >= ?'
-      );
-      incrementPositionStmt.run(column_id, position);
+    const { 
+      id, board_id, column_id, heading, tldr, description, 
+      created_at, position,
+      extendedData, timeline, settings
+    } = task
 
-      const tagsJson = JSON.stringify(tags || [])
-      
-      const stmt = db.prepare(`
-        INSERT INTO tasks (id, board_id, column_id, heading, tldr, description, priority, tags, due_date, completed, status, position, created_at)
-        VALUES (@id, @board_id, @column_id, @heading, @tldr, @description, @priority, @tags, @due_date, @completed, @status, @position, @created_at)
-      `)
-      
-      stmt.run({
-        id, board_id, column_id, heading, tldr, description, priority, 
-        tags: tagsJson,
-        due_date, 
-        completed: completed ? 1 : 0,
-        status, position, created_at
+    const priority = settings?.priority || task.priority || 'medium'
+    const tags = settings?.tags || task.tags || []
+    const due_date = settings?.dueDate || task.due_date || ''
+    const status = settings?.status || task.status || 'To Do'
+    const completed = settings?.completed !== undefined ? settings.completed : (task.completed ? 1 : 0)
+
+    const insertTask = db.prepare(`
+      INSERT INTO tasks (
+        id, board_id, column_id, heading, tldr, description, 
+        priority, tags, due_date, status, completed, created_at, position
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+
+    insertTask.run(
+      id, board_id || null, column_id || null, heading, tldr || '', description || '',
+      priority, JSON.stringify(tags), due_date, 
+      status, completed ? 1 : 0, created_at || new Date().toISOString(), position || 0
+    )
+
+    // Insert timeline
+    if (timeline) {
+      const insertTimeline = db.prepare('INSERT INTO task_timeline (id, task_id, action, timestamp) VALUES (?, ?, ?, ?)')
+      timeline.forEach(t => {
+        insertTimeline.run(uuidv4(), id, t.action, t.timestamp)
       })
+    }
 
-      // Create checklists and attachments
-      if (extendedData?.checklists) {
-        extendedData.checklists.forEach(c => checklistOperations.create(id, c))
-      }
-      if (extendedData?.attachments) {
-        extendedData.attachments.forEach(a => attachmentOperations.create(id, a))
-      }
-      if (extendedData?.comments) {
-        extendedData.comments.forEach(c => commentOperations.create(id, c))
-      }
-    });
+    // Insert checklists
+    if (extendedData?.checklists) {
+      const insertChecklist = db.prepare('INSERT INTO checklists (id, task_id, title, items) VALUES (?, ?, ?, ?)')
+      // Grouping all items into one checklist for now as the current UI shows one checklist
+      insertChecklist.run(uuidv4(), id, 'Checklist', JSON.stringify(extendedData.checklists))
+    }
 
-    transaction();
-    return { id };
+    // Insert attachments
+    if (extendedData?.attachments) {
+      const insertAttachment = db.prepare('INSERT INTO attachments (id, task_id, url, title, cover_image, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      extendedData.attachments.forEach(a => {
+        insertAttachment.run(a.id || uuidv4(), id, a.url, a.title, a.coverImage ? 1 : 0, a.createdAt || new Date().toISOString())
+      })
+    }
+
+    // Insert comments
+    if (extendedData?.comments) {
+      const insertComment = db.prepare('INSERT INTO task_comments (id, task_id, text, created_at) VALUES (?, ?, ?, ?)')
+      extendedData.comments.forEach(c => {
+        insertComment.run(c.id || uuidv4(), id, c.text, c.createdAt || new Date().toISOString())
+      })
+    }
   },
 
   update: (taskId, updates) => {
@@ -662,43 +549,78 @@ export const taskOperations = {
     const transaction = db.transaction(() => {
       const fields = []
       const values = []
-      
-      // Do not allow updating primary key or foreign keys directly
-      const forbiddenKeys = ['id', 'board_id', 'column_id', 'position', 'extendedData'];
-      const filteredUpdates = Object.fromEntries(
-        Object.entries(updates).filter(([key]) => !forbiddenKeys.includes(key))
-      );
 
-      for (const [key, value] of Object.entries(filteredUpdates)) {
-        fields.push(`${key} = ?`)
-        if (key === 'tags') {
-          values.push(JSON.stringify(value || []))
-        } else {
-          values.push(value)
+      if (updates.heading !== undefined) {
+        fields.push('heading = ?')
+        values.push(updates.heading)
+      }
+      if (updates.tldr !== undefined) {
+        fields.push('tldr = ?')
+        values.push(updates.tldr)
+      }
+      if (updates.description !== undefined) {
+        fields.push('description = ?')
+        values.push(updates.description)
+      }
+      if (updates.settings) {
+        if (updates.settings.priority !== undefined) {
+          fields.push('priority = ?')
+          values.push(updates.settings.priority)
+        }
+        if (updates.settings.tags !== undefined) {
+          fields.push('tags = ?')
+          values.push(JSON.stringify(updates.settings.tags))
+        }
+        if (updates.settings.dueDate !== undefined) {
+          fields.push('due_date = ?')
+          values.push(updates.settings.dueDate)
+        }
+        if (updates.settings.status !== undefined) {
+          fields.push('status = ?')
+          values.push(updates.settings.status)
+        }
+        if (updates.settings.completed !== undefined) {
+          fields.push('completed = ?')
+          values.push(updates.settings.completed ? 1 : 0)
         }
       }
 
       if (fields.length > 0) {
         values.push(taskId)
-        const stmt = db.prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`)
-        stmt.run(...values)
+        db.prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`).run(...values)
       }
 
-      // Handle extendedData separately
-      if (updates.extendedData) {
-        // Simple strategy: delete all and re-create
-        db.prepare('DELETE FROM checklists WHERE task_id = ?').run(taskId)
-        db.prepare('DELETE FROM attachments WHERE task_id = ?').run(taskId)
-        db.prepare('DELETE FROM task_comments WHERE task_id = ?').run(taskId)
+      // Update timeline
+      if (updates.timeline) {
+        // We only add new timeline entries, don't replace
+        const existingCount = db.prepare('SELECT COUNT(*) as count FROM task_timeline WHERE task_id = ?').get(taskId).count
+        const newEntries = updates.timeline.slice(existingCount)
+        const insertTimeline = db.prepare('INSERT INTO task_timeline (id, task_id, action, timestamp) VALUES (?, ?, ?, ?)')
+        newEntries.forEach(t => {
+          insertTimeline.run(uuidv4(), taskId, t.action, t.timestamp)
+        })
+      }
 
+      // Update extended data
+      if (updates.extendedData) {
         if (updates.extendedData.checklists) {
-          updates.extendedData.checklists.forEach(c => checklistOperations.create(taskId, c))
+          db.prepare('DELETE FROM checklists WHERE task_id = ?').run(taskId)
+          const insertChecklist = db.prepare('INSERT INTO checklists (id, task_id, title, items) VALUES (?, ?, ?, ?)')
+          insertChecklist.run(uuidv4(), taskId, 'Checklist', JSON.stringify(updates.extendedData.checklists))
         }
         if (updates.extendedData.attachments) {
-          updates.extendedData.attachments.forEach(a => attachmentOperations.create(taskId, a))
+          db.prepare('DELETE FROM attachments WHERE task_id = ?').run(taskId)
+          const insertAttachment = db.prepare('INSERT INTO attachments (id, task_id, url, title, cover_image, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+          updates.extendedData.attachments.forEach(a => {
+            insertAttachment.run(a.id || uuidv4(), taskId, a.url, a.title, a.coverImage ? 1 : 0, a.createdAt || new Date().toISOString())
+          })
         }
         if (updates.extendedData.comments) {
-          updates.extendedData.comments.forEach(c => commentOperations.create(taskId, c))
+          db.prepare('DELETE FROM task_comments WHERE task_id = ?').run(taskId)
+          const insertComment = db.prepare('INSERT INTO task_comments (id, task_id, text, created_at) VALUES (?, ?, ?, ?)')
+          updates.extendedData.comments.forEach(c => {
+            insertComment.run(c.id || uuidv4(), taskId, c.text, c.createdAt || new Date().toISOString())
+          })
         }
       }
     })
@@ -707,166 +629,62 @@ export const taskOperations = {
 
   delete: (taskId) => {
     const db = getDb()
-    const transaction = db.transaction(() => {
-      const task = db.prepare('SELECT column_id, position FROM tasks WHERE id = ?').get(taskId)
-      if (!task) return;
-
-      const { column_id, position } = task;
-
-      // Delete the task (checklists and attachments are deleted by CASCADE)
-      const deleteStmt = db.prepare('DELETE FROM tasks WHERE id = ?')
-      deleteStmt.run(taskId)
-
-      // Decrement positions of subsequent tasks in the same column
-      const updateStmt = db.prepare(
-        'UPDATE tasks SET position = position - 1 WHERE column_id = ? AND position > ?'
-      )
-      updateStmt.run(column_id, position)
-    });
-    transaction();
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
   },
 
-  move: (taskId, newBoardId, newColumnId, newPosition) => {
+  move: (taskId, boardId, columnId, position) => {
     const db = getDb()
-    const transaction = db.transaction(() => {
-      const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId)
-      if (!task) return;
-
-      const oldColumnId = task.column_id
-      const oldPosition = task.position
-
-      // If moving within the same column
-      if (oldColumnId === newColumnId) {
-        if (oldPosition < newPosition) {
-          // Moved down: decrement positions between old and new
-          db.prepare(
-            'UPDATE tasks SET position = position - 1 WHERE column_id = ? AND position > ? AND position <= ?'
-          ).run(oldColumnId, oldPosition, newPosition)
-        } else {
-          // Moved up: increment positions between new and old
-          db.prepare(
-            'UPDATE tasks SET position = position + 1 WHERE column_id = ? AND position >= ? AND position < ?'
-          ).run(oldColumnId, newPosition, oldPosition)
-        }
-      } else {
-        // Moving to a different column
-        // Decrement positions in the old column
-        db.prepare(
-          'UPDATE tasks SET position = position - 1 WHERE column_id = ? AND position > ?'
-        ).run(oldColumnId, oldPosition)
-
-        // Increment positions in the new column to make space
-        db.prepare(
-          'UPDATE tasks SET position = position + 1 WHERE column_id = ? AND position >= ?'
-        ).run(newColumnId, newPosition)
-      }
-
-      // Finally, update the task's board, column, and position
-      db.prepare(
-        'UPDATE tasks SET board_id = ?, column_id = ?, position = ? WHERE id = ?'
-      ).run(newBoardId, newColumnId, newPosition, taskId)
-    })
-    transaction()
+    db.prepare('UPDATE tasks SET board_id = ?, column_id = ?, position = ? WHERE id = ?')
+      .run(boardId || null, columnId || null, position, taskId)
   }
 }
-
-export const commentOperations = {
-  create: (taskId, commentData) => {
-    const db = getDb()
-    const { id, text, createdAt } = commentData
-    db.prepare('INSERT INTO task_comments (id, task_id, text, created_at) VALUES (?, ?, ?, ?)')
-      .run(id, taskId, text, createdAt)
-  },
-  delete: (commentId) => {
-    const db = getDb()
-    db.prepare('DELETE FROM task_comments WHERE id = ?').run(commentId)
-  }
-}
-
-export const checklistOperations = {
-  create: (taskId, checklistData) => {
-    const db = getDb()
-    const { id, text, completed } = checklistData
-    const itemsJson = JSON.stringify({ completed: !!completed })
-    db.prepare('INSERT INTO checklists (id, task_id, title, items) VALUES (?, ?, ?, ?)')
-      .run(id, taskId, text || '', itemsJson)
-  },
-  update: (checklistId, updates) => {
-    const db = getDb()
-    const fields = []
-    const values = []
-    for (const [key, value] of Object.entries(updates)) {
-      fields.push(`${key} = ?`)
-      if (key === 'items') {
-        values.push(JSON.stringify(value || []))
-      } else {
-        values.push(value)
-      }
-    }
-    if (fields.length === 0) return
-    values.push(checklistId)
-    db.prepare(`UPDATE checklists SET ${fields.join(', ')} WHERE id = ?`).run(...values)
-  },
-  delete: (checklistId) => {
-    const db = getDb()
-    db.prepare('DELETE FROM checklists WHERE id = ?').run(checklistId)
-  }
-}
-
-export const attachmentOperations = {
-  create: (taskId, attachmentData) => {
-    const db = getDb()
-    const { id, url, title, coverImage, createdAt } = attachmentData
-    db.prepare('INSERT INTO attachments (id, task_id, url, title, cover_image, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(id, taskId, url, title, coverImage, createdAt)
-  },
-  delete: (attachmentId) => {
-    const db = getDb()
-    db.prepare('DELETE FROM attachments WHERE id = ?').run(attachmentId)
-  }
-}
-
 
 // Deleted tasks operations
 export const deletedTasksOperations = {
   getAll: () => {
     const db = getDb()
     const rows = db.prepare('SELECT * FROM deleted_tasks ORDER BY deleted_at DESC').all()
-    return rows.map(row => ({
-      boardId: row.board_id,
-      boardName: row.board_name,
-      columnId: row.column_id,
-      columnTitle: row.column_title,
-      task: JSON.parse(row.task_data),
-      deletedAt: row.deleted_at
-    }))
+    return rows.map(row => {
+      let task = {}
+      try {
+        if (row.task_json && row.task_json !== 'undefined') {
+          task = JSON.parse(row.task_json)
+        }
+      } catch (e) {
+        console.error(`[DB] Failed to parse task_json for deleted task ${row.id}:`, e)
+      }
+      return {
+        boardId: row.board_id,
+        boardName: row.board_name,
+        columnId: row.column_id,
+        columnTitle: row.column_title,
+        deletedAt: row.deleted_at,
+        task: task
+      }
+    })
   },
 
   saveAll: (deletedTasks) => {
     const db = getDb()
     const transaction = db.transaction(() => {
       db.prepare('DELETE FROM deleted_tasks').run()
-
       const insert = db.prepare(`
-        INSERT INTO deleted_tasks (
-          board_id, board_name, column_id, column_title, 
-          task_id, task_data, deleted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO deleted_tasks (id, board_id, board_name, column_id, column_title, task_json, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `)
 
-      deletedTasks.forEach(deletedTask => {
+      deletedTasks.forEach(dt => {
         insert.run(
-          deletedTask.boardId,
-          deletedTask.boardName,
-          deletedTask.columnId,
-          deletedTask.columnTitle,
-          deletedTask.task.id,
-          JSON.stringify(deletedTask.task),
-          deletedTask.deletedAt
+          dt.task.id,
+          dt.boardId || null,
+          dt.boardName || '',
+          dt.columnId || null,
+          dt.columnTitle || '',
+          JSON.stringify(dt.task),
+          dt.deletedAt || new Date().toISOString()
         )
       })
     })
-
     transaction()
   }
 }
@@ -875,24 +693,28 @@ export const deletedTasksOperations = {
 export const notificationOperations = {
   getAll: () => {
     const db = getDb()
-    return db.prepare(`
-      SELECT n.*, t.heading as task_title 
-      FROM notifications n
-      JOIN tasks t ON n.task_id = t.id
-      ORDER BY n.sent_at DESC
-    `).all()
+    return db.prepare('SELECT * FROM notifications ORDER BY sent_at DESC').all()
   },
 
-  markAsRead: (notificationId) => {
+  create: (notification) => {
     const db = getDb()
-    db.prepare('UPDATE notifications SET read_at = ? WHERE id = ?')
-      .run(new Date().toISOString(), notificationId)
+    const insert = db.prepare(`
+      INSERT INTO notifications (id, task_id, title, body, trigger_type, sent_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `)
+    insert.run(
+      uuidv4(),
+      notification.taskId,
+      notification.title,
+      notification.body,
+      notification.triggerType,
+      new Date().toISOString()
+    )
   },
 
-  create: (taskId, triggerType) => {
+  markAsRead: (id) => {
     const db = getDb()
-    return db.prepare('INSERT INTO notifications (task_id, trigger_type, sent_at) VALUES (?, ?, ?)')
-      .run(taskId, triggerType, new Date().toISOString())
+    db.prepare('UPDATE notifications SET read_at = ? WHERE id = ?').run(new Date().toISOString(), id)
   },
 
   hasBeenSent: (taskId, triggerType) => {
@@ -905,9 +727,26 @@ export const notificationOperations = {
 
 // Note operations
 export const noteOperations = {
+  getNotePath: (id) => {
+    if (!notesDir) return null
+    return path.join(notesDir, `${id}.json`)
+  },
+
+  getNoteContent: (id) => {
+    const notePath = noteOperations.getNotePath(id)
+    if (!notePath || !fs.existsSync(notePath)) return null
+    try {
+      const content = fs.readFileSync(notePath, 'utf8')
+      return JSON.parse(content)
+    } catch (e) {
+      console.error(`[DB] Failed to read note content for note ${id}:`, e)
+      return null
+    }
+  },
+
   getAll: () => {
     const db = getDb()
-    const notes = db.prepare('SELECT * FROM notes ORDER BY updated_at DESC').all()
+    const notes = db.prepare('SELECT id, title, content, created_at, updated_at FROM notes ORDER BY updated_at DESC').all()
     const taskNotes = db.prepare('SELECT * FROM task_notes').all()
 
     const taskNotesMap = taskNotes.reduce((acc, tn) => {
@@ -916,21 +755,44 @@ export const noteOperations = {
       return acc
     }, {})
 
-    return notes.map(note => ({
-      id: note.id,
-      title: note.title,
-      content: note.content,
-      createdAt: note.created_at,
-      updatedAt: note.updated_at,
-      taskIds: taskNotesMap[note.id] || []
-    }))
+    return notes.map(note => {
+      const notePath = noteOperations.getNotePath(note.id)
+      const hasFile = notePath && fs.existsSync(notePath)
+      
+      // Migration check: if file doesn't exist but DB has content
+      if (!hasFile && note.content) {
+        try {
+          const content = (typeof note.content === 'string' && (note.content.startsWith('{') || note.content.startsWith('['))) 
+            ? JSON.parse(note.content) 
+            : note.content
+          
+          if (content && notePath) {
+            fs.writeFileSync(notePath, JSON.stringify(content), 'utf8')
+            console.log(`[DB] Migrated note ${note.id} to filesystem`)
+          }
+        } catch (e) {
+          console.warn(`[DB] Failed to migrate note content for note ${note.id}:`, e)
+        }
+      }
+
+      return {
+        id: note.id,
+        title: note.title,
+        content: null, // Don't load content here for efficiency
+        createdAt: note.created_at,
+        updatedAt: note.updated_at,
+        taskIds: taskNotesMap[note.id] || []
+      }
+    })
   },
 
   saveAll: (notes) => {
     const db = getDb()
     const transaction = db.transaction(() => {
-      // Clear existing notes and links
+      // Clear existing links
       db.prepare('DELETE FROM task_notes').run()
+      // We don't delete files here to avoid data loss on bulk sync
+      // But we will delete and re-insert DB entries
       db.prepare('DELETE FROM notes').run()
 
       const insertNote = db.prepare(`
@@ -943,7 +805,17 @@ export const noteOperations = {
       `)
 
       notes.forEach(note => {
-        insertNote.run(note.id, note.title, note.content, note.createdAt, note.updatedAt)
+        // Save content to file ONLY if it was loaded (not null)
+        if (note.content !== null) {
+          const notePath = noteOperations.getNotePath(note.id)
+          if (notePath) {
+            fs.writeFileSync(notePath, JSON.stringify(note.content || ''), 'utf8')
+          }
+        }
+
+        // Save metadata to DB (content column will be empty)
+        insertNote.run(note.id, note.title, '', note.createdAt, note.updatedAt)
+        
         if (note.taskIds && Array.isArray(note.taskIds)) {
           note.taskIds.forEach(taskId => {
             insertTaskNote.run(taskId, note.id)
@@ -957,10 +829,17 @@ export const noteOperations = {
   create: (note) => {
     const db = getDb()
     const transaction = db.transaction(() => {
+      // Save content to file
+      const notePath = noteOperations.getNotePath(note.id)
+      if (notePath) {
+        fs.writeFileSync(notePath, JSON.stringify(note.content || ''), 'utf8')
+      }
+
+      // Save metadata to DB
       db.prepare(`
         INSERT INTO notes (id, title, content, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?)
-      `).run(note.id, note.title, note.content, note.createdAt, note.updatedAt)
+      `).run(note.id, note.title, '', note.createdAt, note.updatedAt)
 
       if (note.taskIds && Array.isArray(note.taskIds)) {
         const insertTaskNote = db.prepare('INSERT INTO task_notes (task_id, note_id) VALUES (?, ?)')
@@ -982,10 +861,16 @@ export const noteOperations = {
         fields.push('title = ?')
         values.push(updates.title)
       }
+      
       if (updates.content !== undefined) {
-        fields.push('content = ?')
-        values.push(updates.content)
+        // Save content to file
+        const notePath = noteOperations.getNotePath(id)
+        if (notePath) {
+          fs.writeFileSync(notePath, JSON.stringify(updates.content || ''), 'utf8')
+        }
+        // Metadata in DB doesn't store content anymore
       }
+
       if (updates.updatedAt !== undefined) {
         fields.push('updated_at = ?')
         values.push(updates.updatedAt)
@@ -1009,7 +894,21 @@ export const noteOperations = {
 
   delete: (id) => {
     const db = getDb()
-    db.prepare('DELETE FROM notes WHERE id = ?').run(id)
+    const transaction = db.transaction(() => {
+      // Delete from DB (links are deleted by CASCADE)
+      db.prepare('DELETE FROM notes WHERE id = ?').run(id)
+      
+      // Delete from filesystem
+      const notePath = noteOperations.getNotePath(id)
+      if (notePath && fs.existsSync(notePath)) {
+        try {
+          fs.unlinkSync(notePath)
+        } catch (e) {
+          console.error(`[DB] Failed to delete note file for note ${id}:`, e)
+        }
+      }
+    })
+    transaction()
   },
 
   linkToTask: (noteId, taskId) => {

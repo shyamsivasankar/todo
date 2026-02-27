@@ -196,6 +196,23 @@ export const useStore = create(
     setActiveView: (view) => set({ activeView: view }),
     setSelectedNoteId: (id) => set({ selectedNoteId: id }),
 
+    fetchNoteContent: async (id) => {
+      const { notes } = useStore.getState()
+      const note = notes.find((n) => n.id === id)
+      if (!note || note.content !== null) return
+
+      if (window.electronAPI?.getNoteContent) {
+        try {
+          const content = await window.electronAPI.getNoteContent(id)
+          set((state) => ({
+            notes: state.notes.map((n) => (n.id === id ? { ...n, content } : n)),
+          }))
+        } catch (error) {
+          console.error('[Store] Error fetching note content:', error)
+        }
+      }
+    },
+
     addNote: (payload) => {
       const id = uuidv4()
       const now = new Date().toISOString()
@@ -587,7 +604,7 @@ export const useStore = create(
             due_date: task.settings.dueDate,
             status: task.settings.status,
             completed: task.settings.completed,
-            extended_data: task.extendedData,
+            extendedData: task.extendedData,
             position,
           }
 
@@ -642,7 +659,7 @@ export const useStore = create(
                   due_date: task.settings.dueDate,
                   status: task.settings.status,
                   completed: task.settings.completed,
-                  extended_data: task.extendedData,
+                  extendedData: task.extendedData,
                   position,
                 }
 

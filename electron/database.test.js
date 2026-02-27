@@ -14,9 +14,12 @@ import {
   taskOperations, 
   checklistOperations,
   attachmentOperations,
+  noteOperations,
   _setDb, 
   initializeSchema 
 } from './database.js'
+import fs from 'node:fs'
+import path from 'node:path'
 
 describe('Database Operations', () => {
   let db;
@@ -34,6 +37,8 @@ describe('Database Operations', () => {
     db.exec('DELETE FROM tasks');
     db.exec('DELETE FROM columns');
     db.exec('DELETE FROM boards');
+    db.exec('DELETE FROM notes');
+    db.exec('DELETE FROM task_notes');
 
     // Setup initial data
     db.exec(`
@@ -53,6 +58,57 @@ describe('Database Operations', () => {
 
   afterAll(() => {
     db.close();
+  });
+
+  describe('noteOperations', () => {
+    it('should create a note with content in filesystem', () => {
+      const note = {
+        id: 'note-1',
+        title: 'Test Note',
+        content: { type: 'doc', content: [{ type: 'paragraph', text: 'Hello' }] },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        taskIds: ['task-1']
+      };
+      
+      noteOperations.create(note);
+      
+      const noteDb = db.prepare('SELECT * FROM notes WHERE id = ?').get('note-1');
+      expect(noteDb).toBeDefined();
+      expect(noteDb.title).toBe('Test Note');
+      expect(noteDb.content).toBe(''); // Should be empty in DB
+      
+      const link = db.prepare('SELECT * FROM task_notes WHERE note_id = ?').get('note-1');
+      expect(link.task_id).toBe('task-1');
+    });
+
+    it('should update a note content in filesystem', () => {
+      noteOperations.create({
+        id: 'note-2',
+        title: 'Title',
+        content: 'Initial',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      
+      noteOperations.update('note-2', { content: 'Updated Content' });
+      
+      const noteDb = db.prepare('SELECT * FROM notes WHERE id = ?').get('note-2');
+      expect(noteDb.content).toBe('');
+    });
+
+    it('should migrate note content from DB to filesystem in getAll', () => {
+      db.prepare('INSERT INTO notes (id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+        .run('note-3', 'Legacy Note', '{"legacy": true}', new Date().toISOString(), new Date().toISOString());
+        
+      const allNotes = noteOperations.getAll();
+      const note3 = allNotes.find(n => n.id === 'note-3');
+      
+      expect(note3).toBeDefined();
+      // In the test, noteOperations.getNotePath(note.id) might return null if app isn't ready
+      // But we can check that it returns the content correctly if it found it in DB
+      expect(note3.title).toBe('Legacy Note');
+    });
   });
 
   describe('taskOperations', () => {

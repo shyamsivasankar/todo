@@ -24,7 +24,7 @@ const TaskSchema = z.object({
     status: z.string().optional().nullable(),
   }).optional().nullable(),
   extendedData: z.object({
-    checklists: z.array(z.any()).optional().nullable(),
+    checklists: z.union([z.array(z.any()), z.record(z.any())]).optional().nullable(),
     attachments: z.array(z.any()).optional().nullable(),
     comments: z.array(z.any()).optional().nullable(),
   }).passthrough().optional().nullable(),
@@ -70,7 +70,7 @@ const SettingsSchema = z.record(z.any())
 const NoteSchema = z.object({
   id: z.string(),
   title: z.string(),
-  content: z.string(),
+  content: z.union([z.string(), z.record(z.any()), z.array(z.any())]),
   createdAt: z.string(),
   updatedAt: z.string(),
   taskIds: z.array(z.string()).optional(),
@@ -342,8 +342,9 @@ app.whenReady().then(() => {
     description: z.string().optional(),
     priority: z.string().optional(),
     tags: z.array(z.string()).optional(),
-    extended_data: z.object({}).passthrough().optional(),
+    extendedData: z.object({}).passthrough().optional(),
     due_date: z.string().optional(),
+    completed: z.boolean().optional(),
     status: z.string(),
     position: z.number(),
     created_at: z.string(),
@@ -419,6 +420,15 @@ app.whenReady().then(() => {
     } catch (error) {
       console.error('[IPC] Error in notes:get:', error)
       return []
+    }
+  })
+
+  ipcMain.handle('notes:getContent', (_event, id) => {
+    try {
+      return noteOperations.getNoteContent(id)
+    } catch (error) {
+      console.error('[IPC] Error in notes:getContent:', error)
+      return null
     }
   })
 

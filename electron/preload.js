@@ -17,6 +17,7 @@ try {
     getNotifications: () => ipcRenderer.invoke('notifications:get'),
     markNotificationAsRead: (notificationId) => ipcRenderer.send('notifications:markAsRead', notificationId),
     getNotes: () => ipcRenderer.invoke('notes:get'),
+    getNoteContent: (id) => ipcRenderer.invoke('notes:getContent', id),
     saveNotes: (notes) => ipcRenderer.send('notes:set', notes),
     createNote: (note) => ipcRenderer.invoke('notes:create', note),
     updateNote: (id, updates) => ipcRenderer.send('notes:update', { id, updates }),

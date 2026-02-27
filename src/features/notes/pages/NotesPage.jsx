@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Search, Trash2, StickyNote, FileText } from 'lucide-react';
 import { useStore } from '../../../store/useStore';
 import NoteEditor from '../components/NoteEditor';
@@ -17,69 +17,95 @@ const formatRelativeTime = (dateString) => {
 };
 
 export default function NotesPage() {
-  const { notes, addNote, updateNote, removeNote, selectedNoteId, setSelectedNoteId } = useStore();
+  const { notes, addNote, updateNote, removeNote, selectedNoteId, setSelectedNoteId, fetchNoteContent } = useStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [localTitle, setLocalTitle] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const latestContentRef = useRef(null);
   
   const selectedNote = notes.find(n => n.id === selectedNoteId);
-  
-  // Sync local title when selected note changes
+  const selectedNoteContentNull = selectedNote ? selectedNote.content === null : true;
+
+  // Fetch note content when selectedNoteId changes (stable deps to avoid render loops)
+  useEffect(() => {
+    if (!selectedNoteId) return;
+    const note = useStore.getState().notes.find((n) => n.id === selectedNoteId);
+    if (note && note.content === null) {
+      fetchNoteContent(selectedNoteId);
+    }
+  }, [selectedNoteId, fetchNoteContent]);
+
+  // Sync local title and reset content ref when selected note changes
   useEffect(() => {
     const title = selectedNote ? selectedNote.title : '';
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalTitle(title);
-  }, [selectedNoteId, selectedNote]);
+    latestContentRef.current = selectedNote ? selectedNote.content : null;
+  }, [selectedNoteId, selectedNote?.title ?? '', selectedNoteContentNull]);
 
-  // Auto-save logic for title and content
-  const saveTimeoutRef = useRef(null);
-  
-  const debouncedUpdate = useCallback((id, updates) => {
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
+  const handleManualSave = () => {
+    if (selectedNoteId) {
+      const updates = { 
+        title: localTitle,
+        content: latestContentRef.current 
+      };
+      
+      setIsSaving(true);
+      updateNote(selectedNoteId, updates);
+      
+      // Simulate a brief saving state for UX
+      setTimeout(() => {
+        setIsSaving(false);
+      }, 500);
+    }
+  };
+
+  // Debounced auto-save
+  const autoSaveTimeoutRef = useRef(null);
+  const triggerAutoSave = (id, updates) => {
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
     }
     
-    saveTimeoutRef.current = setTimeout(() => {
-      updateNote(id, updates);
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      if (id) {
+        updateNote(id, updates);
+      }
     }, 1000);
-  }, [updateNote]);
+  };
 
   const handleTitleChange = (e) => {
     const newTitle = e.target.value;
     setLocalTitle(newTitle);
-    if (selectedNoteId) {
-      debouncedUpdate(selectedNoteId, { title: newTitle });
-    }
+    triggerAutoSave(selectedNoteId, { title: newTitle });
   };
 
   const handleContentChange = (content) => {
-    if (selectedNoteId) {
-      debouncedUpdate(selectedNoteId, { content });
-    }
+    latestContentRef.current = content;
+    triggerAutoSave(selectedNoteId, { content });
   };
 
   const handleCreateNote = () => {
     addNote({ title: 'Untitled Note', content: '' });
   };
 
-  // Auto-select the newest note when one is added
-  const prevNotesLength = useRef(notes.length);
-  useEffect(() => {
-    if (notes.length > prevNotesLength.current) {
-      const firstNoteId = notes[0]?.id;
-      if (firstNoteId) {
-        setSelectedNoteId(firstNoteId);
-      }
-    }
-    prevNotesLength.current = notes.length;
-  }, [notes, setSelectedNoteId]);
 
-  // Initial selection
+  // Auto-select the newest note when one is added (stable deps: length + first id)
+  const prevNotesLength = useRef(notes.length);
+  const notesLength = notes.length;
+  const firstNoteId = notes[0]?.id ?? null;
   useEffect(() => {
-    if (!selectedNoteId && notes.length > 0) {
-      const firstNoteId = notes[0].id;
+    if (notesLength > prevNotesLength.current) {
+      if (firstNoteId) setSelectedNoteId(firstNoteId);
+    }
+    prevNotesLength.current = notesLength;
+  }, [notesLength, firstNoteId, setSelectedNoteId]);
+
+  // Initial selection (run only when we have notes but no selection)
+  useEffect(() => {
+    if (!selectedNoteId && notesLength > 0 && firstNoteId) {
       setSelectedNoteId(firstNoteId);
     }
-  }, [notes, selectedNoteId, setSelectedNoteId]);
+  }, [selectedNoteId, notesLength, firstNoteId, setSelectedNoteId]);
 
   const filteredNotes = notes.filter(n => 
     n.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -179,12 +205,20 @@ export default function NotesPage() {
                 <span>Last updated {formatRelativeTime(selectedNote.updatedAt)}</span>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-10 pb-10 custom-scrollbar">
-              <NoteEditor
-                key={selectedNote.id}
-                initialContent={selectedNote.content}
-                onChange={handleContentChange}
-              />
+            <div className="flex-1 px-10 pb-10 overflow-hidden">
+              {selectedNote.content === null ? (
+                <div className="w-full h-full bg-zinc-900/20 rounded-2xl border border-zinc-800 animate-pulse flex items-center justify-center">
+                  <span className="text-zinc-500 text-sm font-medium">Loading note content...</span>
+                </div>
+              ) : (
+                <NoteEditor
+                  key={selectedNote.id}
+                  initialContent={selectedNote.content}
+                  onChange={handleContentChange}
+                  onSave={handleManualSave}
+                  isSaving={isSaving}
+                />
+              )}
             </div>
           </div>
         ) : (

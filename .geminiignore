@@ -1,0 +1,8 @@
+# Gemini CLI: paths to exclude from file search and context (same pattern rules as .gitignore)
+node_modules/
+dist/
+build/
+.git/
+*.log
+.env
+.env.*

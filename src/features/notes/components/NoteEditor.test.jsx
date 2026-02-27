@@ -66,7 +66,7 @@ describe('NoteEditor', () => {
     };
     useEditor.mockReturnValue(mockEditor);
 
-    render(<NoteEditor initialContent="" onChange={() => {}} />);
+    render(<NoteEditor initialContent="" onChange={() => {}} onSave={() => {}} isSaving={false} />);
     
     expect(screen.getByTestId('editor-content')).toBeDefined();
     expect(screen.getByTitle('Bold')).toBeDefined();
@@ -80,6 +80,41 @@ describe('NoteEditor', () => {
     expect(screen.getByTitle('Add Image')).toBeDefined();
     expect(screen.getByTitle('Add Link')).toBeDefined();
     expect(screen.getByTitle('Insert Mermaid Diagram')).toBeDefined();
+    expect(screen.getByText('Save Note')).toBeDefined();
+    expect(screen.getByText('Saved')).toBeDefined();
+  });
+
+  it('should call onSave when the Save Note button is clicked', () => {
+    const mockEditor = {
+      chain: vi.fn().mockReturnThis(),
+      focus: vi.fn().mockReturnThis(),
+      run: vi.fn(),
+      isActive: vi.fn().mockReturnValue(false),
+      getAttributes: vi.fn().mockReturnValue({}),
+    };
+    useEditor.mockReturnValue(mockEditor);
+    const onSave = vi.fn();
+
+    render(<NoteEditor initialContent="" onChange={() => {}} onSave={onSave} isSaving={false} />);
+    
+    const saveButton = screen.getByText('Save Note');
+    saveButton.click();
+    expect(onSave).toHaveBeenCalled();
+  });
+
+  it('should show Saving... state when isSaving is true', () => {
+    const mockEditor = {
+      chain: vi.fn().mockReturnThis(),
+      focus: vi.fn().mockReturnThis(),
+      run: vi.fn(),
+      isActive: vi.fn().mockReturnValue(false),
+      getAttributes: vi.fn().mockReturnValue({}),
+    };
+    useEditor.mockReturnValue(mockEditor);
+
+    render(<NoteEditor initialContent="" onChange={() => {}} onSave={() => {}} isSaving={true} />);
+    
+    expect(screen.getByText('Saving...')).toBeDefined();
   });
 
   it('should call onChange when editor content is updated', () => {
