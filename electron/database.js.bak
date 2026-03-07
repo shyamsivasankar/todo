@@ -805,6 +805,210 @@ export const notificationOperations = {
   }
 }
 
+// Note operations
+export const noteOperations = {
+  getNotePath: (id) => {
+    if (!notesDir) return null
+    return path.join(notesDir, `${id}.json`)
+  },
+
+  getNoteContent: (id) => {
+    const notePath = noteOperations.getNotePath(id)
+    if (!notePath || !fs.existsSync(notePath)) return null
+    try {
+      const content = fs.readFileSync(notePath, 'utf8')
+      return JSON.parse(content)
+    } catch (e) {
+      console.error(`[DB] Failed to read note content for note ${id}:`, e)
+      return null
+    }
+  },
+
+  getAll: () => {
+    const db = getDb()
+    const notes = db.prepare('SELECT id, title, content, created_at, updated_at FROM notes ORDER BY updated_at DESC').all()
+    const taskNotes = db.prepare('SELECT * FROM task_notes').all()
+
+    const taskNotesMap = taskNotes.reduce((acc, tn) => {
+      if (!acc[tn.note_id]) acc[tn.note_id] = []
+      acc[tn.note_id].push(tn.task_id)
+      return acc
+    }, {})
+
+    return notes.map(note => {
+      const notePath = noteOperations.getNotePath(note.id)
+      const hasFile = notePath && fs.existsSync(notePath)
+      
+      // Migration check: if file doesn't exist but DB has content
+      if (!hasFile && note.content) {
+        try {
+          const content = (typeof note.content === 'string' && (note.content.startsWith('{') || note.content.startsWith('['))) 
+            ? JSON.parse(note.content) 
+            : note.content
+          
+          if (content && notePath) {
+            fs.writeFileSync(notePath, JSON.stringify(content), 'utf8')
+            console.log(`[DB] Migrated note ${note.id} to filesystem`)
+          }
+        } catch (e) {
+          console.warn(`[DB] Failed to migrate note content for note ${note.id}:`, e)
+        }
+      }
+
+      return {
+        id: note.id,
+        title: note.title,
+        content: null, // Don't load content here for efficiency
+        createdAt: note.created_at,
+        updatedAt: note.updated_at,
+        taskIds: taskNotesMap[note.id] || []
+      }
+    })
+  },
+
+  saveAll: (notes) => {
+    const db = getDb()
+    const transaction = db.transaction(() => {
+      // Clear existing links
+      db.prepare('DELETE FROM task_notes').run()
+      // We don't delete files here to avoid data loss on bulk sync
+      // But we will delete and re-insert DB entries
+      db.prepare('DELETE FROM notes').run()
+
+      const insertNote = db.prepare(`
+        INSERT INTO notes (id, title, content, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+      `)
+      const insertTaskNote = db.prepare(`
+        INSERT INTO task_notes (task_id, note_id)
+        VALUES (?, ?)
+      `)
+
+      notes.forEach(note => {
+        // Save content to file ONLY if it was loaded (not null)
+        if (note.content !== null) {
+          const notePath = noteOperations.getNotePath(note.id)
+          if (notePath) {
+            fs.writeFileSync(notePath, JSON.stringify(note.content || ''), 'utf8')
+          }
+        }
+
+        // Save metadata to DB (content column will be empty)
+        insertNote.run(note.id, note.title, '', note.createdAt, note.updatedAt)
+        
+        if (note.taskIds && Array.isArray(note.taskIds)) {
+          note.taskIds.forEach(taskId => {
+            insertTaskNote.run(taskId, note.id)
+          })
+        }
+      })
+    })
+    transaction()
+  },
+
+  create: (note) => {
+    const db = getDb()
+    const transaction = db.transaction(() => {
+      // Check if note already exists
+      const existing = db.prepare('SELECT id FROM notes WHERE id = ?').get(note.id)
+      if (existing) {
+        console.log('[DB] Note already exists, skipping create:', note.id)
+        return
+      }
+      
+      // Save content to file
+      const notePath = noteOperations.getNotePath(note.id)
+      if (notePath) {
+        fs.writeFileSync(notePath, JSON.stringify(note.content || ''), 'utf8')
+      }
+
+      // Save metadata to DB
+      db.prepare(`
+        INSERT INTO notes (id, title, content, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(note.id, note.title, '', note.createdAt, note.updatedAt)
+
+      if (note.taskIds && Array.isArray(note.taskIds)) {
+        const insertTaskNote = db.prepare('INSERT INTO task_notes (task_id, note_id) VALUES (?, ?)')
+        note.taskIds.forEach(taskId => {
+          insertTaskNote.run(taskId, note.id)
+        })
+      }
+    })
+    transaction()
+  },
+
+  update: (id, updates) => {
+    const db = getDb()
+    const transaction = db.transaction(() => {
+      const fields = []
+      const values = []
+
+      if (updates.title !== undefined) {
+        fields.push('title = ?')
+        values.push(updates.title)
+      }
+      
+      if (updates.content !== undefined) {
+        // Save content to file
+        const notePath = noteOperations.getNotePath(id)
+        if (notePath) {
+          fs.writeFileSync(notePath, JSON.stringify(updates.content || ''), 'utf8')
+        }
+        // Metadata in DB doesn't store content anymore
+      }
+
+      if (updates.updatedAt !== undefined) {
+        fields.push('updated_at = ?')
+        values.push(updates.updatedAt)
+      }
+
+      if (fields.length > 0) {
+        values.push(id)
+        db.prepare(`UPDATE notes SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+      }
+
+      if (updates.taskIds !== undefined) {
+        db.prepare('DELETE FROM task_notes WHERE note_id = ?').run(id)
+        const insertTaskNote = db.prepare('INSERT INTO task_notes (task_id, note_id) VALUES (?, ?)')
+        updates.taskIds.forEach(taskId => {
+          insertTaskNote.run(taskId, id)
+        })
+      }
+    })
+    transaction()
+  },
+
+  delete: (id) => {
+    const db = getDb()
+    const transaction = db.transaction(() => {
+      // Delete from DB (links are deleted by CASCADE)
+      db.prepare('DELETE FROM notes WHERE id = ?').run(id)
+      
+      // Delete from filesystem
+      const notePath = noteOperations.getNotePath(id)
+      if (notePath && fs.existsSync(notePath)) {
+        try {
+          fs.unlinkSync(notePath)
+        } catch (e) {
+          console.error(`[DB] Failed to delete note file for note ${id}:`, e)
+        }
+      }
+    })
+    transaction()
+  },
+
+  linkToTask: (noteId, taskId) => {
+    const db = getDb()
+    db.prepare('INSERT OR IGNORE INTO task_notes (task_id, note_id) VALUES (?, ?)').run(taskId, noteId)
+  },
+
+  unlinkFromTask: (noteId, taskId) => {
+    const db = getDb()
+    db.prepare('DELETE FROM task_notes WHERE task_id = ? AND note_id = ?').run(taskId, noteId)
+  }
+}
+
 // Settings operations
 export const settingsOperations = {
   getAll: () => {

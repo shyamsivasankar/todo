@@ -70,7 +70,7 @@ const SettingsSchema = z.record(z.any())
 const NoteSchema = z.object({
   id: z.string(),
   title: z.string(),
-  content: z.union([z.string(), z.record(z.any()), z.array(z.any())]),
+  content: z.union([z.string(), z.record(z.any()), z.array(z.any())]).nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   taskIds: z.array(z.string()).optional(),
@@ -184,7 +184,12 @@ function checkDeadlines() {
         notification.show()
 
         // Log in database
-        notificationOperations.create(task.id, triggerType)
+        notificationOperations.create({
+          taskId: task.id,
+          title: 'FocusFlow Deadline Reminder',
+          body: message,
+          triggerType: triggerType,
+        })
 
         // Notify renderer to refresh notification center
         if (mainWindow) {

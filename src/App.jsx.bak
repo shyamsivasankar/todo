@@ -464,6 +464,15 @@ function App() {
           </div>
         )}
 
+        {/* Notes View */}
+        {activeView === 'notes' && (
+          <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+            <Suspense fallback={<LoadingFallback message="Loading notes..." />}>
+              <NotesPage />
+            </Suspense>
+          </div>
+        )}
+
         {/* Settings View */}
         {activeView === 'settings' && (
           <main className="flex-1 overflow-y-auto p-8 custom-scrollbar">

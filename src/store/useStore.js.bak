@@ -1637,4 +1637,25 @@ export const attachBoardPersistence = () => {
     },
   )
 
+  useStore.subscribe(
+    (state) => state.notes,
+    (notes) => {
+      if (notesFirstEmit) {
+        notesFirstEmit = false
+        return
+      }
+      if (!useStore.getState().hydrationComplete) {
+        return
+      }
+      try {
+        if (window.electronAPI?.saveNotes) {
+          window.electronAPI.saveNotes(notes)
+        } else {
+          localStorage.setItem('todo_notes', JSON.stringify(notes))
+        }
+      } catch (error) {
+        console.error('Failed to save notes:', error)
+      }
+    },
+  )
 }
