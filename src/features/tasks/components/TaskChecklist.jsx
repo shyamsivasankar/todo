@@ -1,12 +1,9 @@
-import { Plus } from 'lucide-react'
+import { Plus, Terminal, Activity } from 'lucide-react'
 import { useStore } from '../../../store/useStore'
 import ChecklistItem from './ChecklistItem'
+import CyberBadge from '../../../components/ui/CyberBadge'
+import CyberButton from '../../../components/ui/CyberButton'
 
-/**
- * TaskChecklist Component
- *
- * Orchestrates the full checklist section within the task detail panel.
- */
 export default function TaskChecklist({ boardId, columnId, taskId, checklists }) {
   const addTaskChecklistItem = useStore((state) => state.addTaskChecklistItem)
   const updateTaskChecklist = useStore((state) => state.updateTaskChecklist)
@@ -24,47 +21,47 @@ export default function TaskChecklist({ boardId, columnId, taskId, checklists })
     removeTaskChecklistItem(boardId, columnId, taskId, itemId)
   }
 
-  // Calculate progress
   const totalItems = checklists?.length || 0
   const completedItems = checklists?.filter(i => i.completed).length || 0
   const progressPercent = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0
 
   return (
-    <div className="group relative">
-      <div className="flex items-center justify-between mb-4">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between border-b border-white/5 pb-2">
         <div className="flex items-center gap-3">
-          <label className="block text-xs font-bold text-text-muted uppercase tracking-widest">
-            Checklist
+          <label className="flex items-center gap-2 text-[10px] font-orbitron font-bold text-white uppercase tracking-widest">
+            <Terminal className="h-3.5 w-3.5 text-cyber-blue" />
+            Sub-Sequences
           </label>
           {totalItems > 0 && (
-            <span className="text-[10px] font-mono text-text-muted/70 bg-surface px-1.5 py-0.5 rounded border border-border">
+            <CyberBadge variant={progressPercent === 100 ? 'lime' : 'blue'} size="xs">
               {completedItems}/{totalItems} ({progressPercent}%)
-            </span>
+            </CyberBadge>
           )}
         </div>
-        <button
-          type="button"
+        <CyberButton
+          variant="blue"
+          size="xs"
+          outline
+          icon={Plus}
           onClick={handleAddItem}
-          className="p-1 rounded hover:bg-surface-light text-text-muted hover:text-primary transition-all flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
-          title="Add Item"
         >
-          <Plus className="h-3 w-3" />
-          Add Item
-        </button>
+          Add_Node
+        </CyberButton>
       </div>
 
       {/* Progress Bar */}
       {totalItems > 0 && (
-        <div className="h-1 w-full bg-surface-dark rounded-full mb-4 overflow-hidden">
+        <div className="h-1 w-full bg-white/5 relative overflow-hidden">
           <div 
-            className="h-full bg-primary transition-all duration-300 ease-out"
+            className={`h-full transition-all duration-1000 ease-out shadow-neon-${progressPercent === 100 ? 'lime' : 'blue'} ${progressPercent === 100 ? 'bg-cyber-lime' : 'bg-cyber-blue'}`}
             style={{ width: `${progressPercent}%` }}
           />
         </div>
       )}
 
       {/* Items List */}
-      <div className="space-y-1">
+      <div className="space-y-2">
         {checklists?.length > 0 ? (
           checklists.map((item) => (
             <ChecklistItem 
@@ -78,9 +75,9 @@ export default function TaskChecklist({ boardId, columnId, taskId, checklists })
           <button 
             type="button"
             onClick={handleAddItem}
-            className="text-xs text-text-muted/50 italic hover:text-primary transition-colors py-2"
+            className="w-full py-4 border border-dashed border-white/5 text-[10px] font-mono text-surface-highest uppercase tracking-widest hover:bg-white/5 hover:text-cyber-blue transition-all"
           >
-            No checklist items. Click to add subtasks...
+            [ NULL_SUB_SEQUENCES: CLICK_TO_INITIALIZE ]
           </button>
         )}
       </div>

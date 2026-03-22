@@ -11,12 +11,23 @@ const useSearch = () => {
     boards.forEach(board => {
       board.columns.forEach(column => {
         column.tasks.forEach(task => {
-          tasks.push({ ...task, boardName: board.name, columnName: column.title });
+          tasks.push({ 
+            ...task, 
+            boardId: board.id, 
+            columnId: column.id, 
+            boardName: board.name, 
+            columnName: column.title 
+          });
         });
       });
     });
     standaloneTasks.forEach(task => {
-      tasks.push({ ...task, boardName: 'Standalone' });
+      tasks.push({ 
+        ...task, 
+        boardId: null, 
+        columnId: null, 
+        boardName: 'Standalone' 
+      });
     });
     return tasks;
   }, [boards, standaloneTasks]);

@@ -6,6 +6,7 @@ node_modules/
 # Build outputs
 dist/
 dist-ssr/
+dist-electron/
 build/
 out/
 *.local
@@ -84,6 +85,9 @@ coverage/
 
 # SQLite database files
 *.db
+*.db-journal
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 db-test/

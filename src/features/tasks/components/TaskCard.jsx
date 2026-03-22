@@ -1,19 +1,31 @@
 import { useDraggable } from '@dnd-kit/core'
-import { Calendar, CheckCircle2, Clock, Pencil, X } from 'lucide-react'
+import { Calendar, CheckCircle2, Clock, Pencil, X, Hash, AlertTriangle, Cpu } from 'lucide-react'
 import { useStore } from '../../../store/useStore'
 
-const priorityBadges = {
+const priorityStyles = {
   high: {
-    label: 'High',
-    className: 'bg-red-500/20 text-red-300',
+    label: 'CRITICAL',
+    color: 'text-cyber-amber',
+    bg: 'bg-cyber-amber',
+    borderColor: 'border-cyber-amber/50',
+    glow: 'shadow-neon-amber',
+    icon: <AlertTriangle className="h-3 w-3 animate-pulse" />,
   },
   medium: {
-    label: 'Medium',
-    className: 'bg-yellow-500/20 text-yellow-300',
+    label: 'ACTIVE',
+    color: 'text-cyber-blue',
+    bg: 'bg-cyber-blue',
+    borderColor: 'border-cyber-blue/50',
+    glow: 'shadow-neon-blue',
+    icon: <Clock className="h-3 w-3" />,
   },
   low: {
-    label: 'Low',
-    className: 'bg-slate-700 text-slate-300',
+    label: 'STABLE',
+    color: 'text-cyber-lime',
+    bg: 'bg-cyber-lime',
+    borderColor: 'border-cyber-lime/50',
+    glow: 'shadow-neon-lime',
+    icon: <CheckCircle2 className="h-3 w-3" />,
   },
 }
 
@@ -24,13 +36,12 @@ function formatDueDate(dateStr, isCompleted = false) {
   const diffMs = due - now
   const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
 
-  if (!isCompleted && diffDays < 0) return { text: 'Overdue', urgent: true }
-  if (diffDays === 0) return { text: 'Due Today', urgent: !isCompleted }
-  if (diffDays === 1) return { text: 'Tomorrow', urgent: false }
-  if (diffDays <= 7) return { text: `${diffDays} days`, urgent: false }
-
+  if (!isCompleted && diffDays < 0) return { text: 'OVERDUE_SIGNAL', urgent: true }
+  if (diffDays === 0) return { text: 'DUE_CYCLE_0', urgent: !isCompleted }
+  if (diffDays === 1) return { text: 'NEXT_CYCLE', urgent: false }
+  
   return {
-    text: due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    text: `T-${diffDays}D`,
     urgent: false,
   }
 }
@@ -52,8 +63,10 @@ export default function TaskCard({ boardId, columnId, task, isDone = false, onOp
     return (
       <div
         ref={setNodeRef}
-        className="h-[162px] w-full rounded-lg bg-primary/5 border border-dashed border-primary/20"
-      />
+        className="h-[140px] w-full rounded-sm bg-cyber-blue/5 border border-dashed border-cyber-blue/30 animate-pulse relative overflow-hidden"
+      >
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-cyber-blue/10 to-transparent animate-scanline" />
+      </div>
     )
   }
 
@@ -62,7 +75,7 @@ export default function TaskCard({ boardId, columnId, task, isDone = false, onOp
     : undefined
 
   const priority = task.settings?.priority || 'medium'
-  const badge = priorityBadges[priority] || priorityBadges.medium
+  const pStyle = priorityStyles[priority] || priorityStyles.medium
   const isCompleted = !!task.settings?.completed || isDone
   const dueInfo = formatDueDate(task.settings?.dueDate, isCompleted)
   const tagList = task.settings?.tags || []
@@ -70,37 +83,35 @@ export default function TaskCard({ boardId, columnId, task, isDone = false, onOp
   return (
     <article
       ref={isOverlay ? null : setNodeRef}
+      className={`
+        relative group rounded-sm p-4 transition-all duration-150 border bg-surface-low overflow-hidden
+        ${isOverlay ? `cursor-grabbing border-cyber-blue shadow-neon-blue scale-105 z-50` : 'cursor-grab border-white/5 hover:border-white/20 hover:bg-surface-high'}
+        ${isCompleted ? 'opacity-40 grayscale' : ''}
+      `}
       style={style}
-      className={`rounded-lg p-4 transition-lift group backdrop-blur-sm border shadow-sm ${
-        !isOverlay && isDragging
-          ? 'cursor-grabbing opacity-70 bg-surface/80 border-primary/50'
-          : 'cursor-grab bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10 glass-card'
-        } ${isCompleted ? 'opacity-75' : ''}`}
       {...(!isOverlay ? attributes : {})}
       {...(!isOverlay ? listeners : {})}
     >
-      {/* Priority badge + edit button */}
-      <div className="flex justify-between items-start mb-2">
+      {/* Background visual accents */}
+      <div className="absolute top-0 right-0 p-2 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none scale-125 -translate-y-2">
+        <Cpu className={`h-16 w-16 ${pStyle.color}`} />
+      </div>
+
+      {/* Decorative side accent */}
+      <div className={`absolute left-0 top-0 bottom-0 w-1 ${isCompleted ? 'bg-surface-variant' : pStyle.bg} opacity-50 group-hover:opacity-100 transition-opacity ${isOverlay ? pStyle.glow : ''}`} />
+
+      {/* Header: Priority + ID */}
+      <div className="flex justify-between items-start mb-3 relative z-10">
         <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={isCompleted}
-            onChange={(e) => {
-              e.stopPropagation()
-              updateTask(boardId, columnId, task.id, {
-                settings: { ...task.settings, completed: e.target.checked },
-              })
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-            className="h-4 w-4 rounded border-white/20 bg-transparent text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0 cursor-pointer"
-          />
-          <span className={`inline-block rounded px-2 py-1 text-[10px] font-bold tracking-wide uppercase ${badge.className}`}>
-            {badge.label}
+          <div className={`flex items-center gap-1.5 font-orbitron text-[9px] font-black uppercase tracking-[0.2em] ${pStyle.color}`}>
+            {pStyle.icon}
+            {pStyle.label}
+          </div>
+          <div className="w-[1px] h-3 bg-white/10" />
+          <span className="font-mono text-[8px] text-surface-variant uppercase tracking-widest">
+            {task.id.toString().slice(-4)}
           </span>
         </div>
-        {isCompleted && (
-          <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-        )}
         {!isCompleted && (
           <button
             type="button"
@@ -109,14 +120,14 @@ export default function TaskCard({ boardId, columnId, task, isDone = false, onOp
               e.stopPropagation()
               onOpen()
             }}
-            className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-white transition-opacity"
+            className="opacity-0 group-hover:opacity-100 text-surface-variant hover:text-cyber-blue transition-all bg-black/40 p-1 rounded-sm border border-white/5"
           >
-            <Pencil className="h-4 w-4" />
+            <Pencil className="h-3 w-3" />
           </button>
         )}
       </div>
 
-      {/* Task heading */}
+      {/* Task Content */}
       <button
         type="button"
         onPointerDown={(e) => e.stopPropagation()}
@@ -124,60 +135,61 @@ export default function TaskCard({ boardId, columnId, task, isDone = false, onOp
           e.stopPropagation()
           onOpen()
         }}
-        className="w-full text-left"
+        className="w-full text-left mb-4 relative z-10"
       >
-        <h3 className={`font-semibold mb-1 ${isCompleted ? 'text-text-muted line-through' : 'text-text-primary'}`}>
+        <h3 className={`font-orbitron text-xs font-black leading-tight mb-2 uppercase tracking-tight ${isCompleted ? 'text-surface-variant line-through' : 'text-white group-hover:text-cyber-blue transition-colors'}`}>
           {task.heading}
         </h3>
         {task.tldr && (
-          <p className={`text-xs mb-4 line-clamp-2 ${isCompleted ? 'text-text-muted/60' : 'text-text-muted'}`}>
+          <p className="font-mono text-[9px] leading-relaxed line-clamp-2 text-surface-variant border-l border-white/10 pl-2 py-0.5">
             {task.tldr}
           </p>
         )}
       </button>
 
-      {/* Tags */}
-      {tagList.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-3">
+      {/* Footer: Tags & Due Date */}
+      <div className="flex items-center justify-between mt-auto pt-3 border-t border-white/5 relative z-10">
+        <div className="flex flex-wrap gap-1.5 max-w-[65%]">
           {tagList.map((tag) => (
-            <span
-              key={tag}
-              className="group relative rounded bg-surface-light px-2 py-0.5 text-[10px] text-text-muted transition-all hover:pr-5"
-            >
-              #{tag}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  const nextTags = tagList.filter((t) => t !== tag)
-                  updateTask(boardId, columnId, task.id, {
-                    settings: { ...task.settings, tags: nextTags },
-                  })
-                }}
-                className="absolute right-0.5 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-text-muted/50 opacity-0 transition-all hover:bg-white/10 hover:text-white group-hover:opacity-100"
-              >
-                <X className="h-2.5 w-2.5" />
-              </button>
+            <span key={tag} className="flex items-center gap-1 text-[8px] font-mono text-surface-variant uppercase tracking-widest bg-black/40 px-1.5 py-0.5 rounded-sm border border-white/5">
+              <Hash className="h-2 w-2 text-cyber-violet" />
+              {tag}
             </span>
           ))}
         </div>
-      )}
 
-      {/* Footer with due date */}
-      <div className="flex items-center justify-between pt-3 border-t border-border/50">
         {dueInfo ? (
-          <div className={`flex items-center gap-1 text-xs ${dueInfo.urgent ? 'text-red-400 font-medium' : 'text-text-muted'}`}>
-            {dueInfo.urgent ? (
-              <Clock className="h-3.5 w-3.5" />
-            ) : (
-              <Calendar className="h-3.5 w-3.5" />
-            )}
-            <span>{dueInfo.text}</span>
+          <div className={`font-mono text-[9px] font-bold tracking-widest ${dueInfo.urgent ? 'text-cyber-pink animate-pulse' : 'text-surface-variant'}`}>
+            [{dueInfo.text}]
           </div>
         ) : (
-          <span className="text-xs text-text-muted/50">No due date</span>
+          <div className="font-mono text-[8px] text-surface-highest uppercase tracking-widest">NO_DEADLINE</div>
         )}
       </div>
+
+      {/* Checkbox Overlay (only on hover) */}
+      <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+        <input
+          type="checkbox"
+          checked={isCompleted}
+          onChange={(e) => {
+            e.stopPropagation()
+            updateTask(boardId, columnId, task.id, {
+              settings: { ...task.settings, completed: e.target.checked },
+            })
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="h-4 w-4 appearance-none rounded-sm border-2 border-white/20 bg-black/40 checked:bg-cyber-lime checked:border-cyber-lime transition-all cursor-pointer relative before:content-['✓'] before:absolute before:inset-0 before:text-black before:text-[10px] before:font-black before:flex before:items-center before:justify-center before:opacity-0 checked:before:opacity-100"
+        />
+      </div>
+
+      {/* Decorative corners for overlay */}
+      {isOverlay && (
+        <>
+          <div className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-cyber-blue opacity-50" />
+          <div className="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-cyber-blue opacity-50" />
+        </>
+      )}
     </article>
   )
 }

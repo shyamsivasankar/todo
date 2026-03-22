@@ -1,8 +1,11 @@
-import { Inbox, Plus, Search } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { Inbox, Plus, Search, Terminal, Activity, Zap, Filter, Cpu, Layers } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useStore } from '../../../store/useStore'
 import TaskDetailPanel from '../components/TaskDetailPanel'
 import TaskListItem from '../components/TaskListItem'
+import CyberButton from '../../../components/ui/CyberButton'
+import CyberInput from '../../../components/ui/CyberInput'
+import CyberBadge from '../../../components/ui/CyberBadge'
 
 function groupTasksByDate(tasks) {
   const now = new Date()
@@ -11,13 +14,13 @@ function groupTasksByDate(tasks) {
   const nextWeek = new Date(today.getTime() + 7 * 86400000)
 
   const groups = {
-    overdue: { label: 'Overdue', items: [] },
-    today: { label: 'Today', items: [] },
-    tomorrow: { label: 'Tomorrow', items: [] },
-    thisWeek: { label: 'This Week', items: [] },
-    nextWeek: { label: 'Next Week', items: [] },
-    later: { label: 'Later', items: [] },
-    noDueDate: { label: 'No Due Date', items: [] },
+    overdue: { label: 'CRITICAL_DELAY', items: [], variant: 'pink' },
+    today: { label: 'CYCLE_CURRENT', items: [], variant: 'blue' },
+    tomorrow: { label: 'CYCLE_NEXT', items: [], variant: 'cyan' },
+    thisWeek: { label: 'WINDOW_SHORT', items: [], variant: 'violet' },
+    nextWeek: { label: 'WINDOW_MEDIUM', items: [], variant: 'violet' },
+    later: { label: 'WINDOW_LONG', items: [], variant: 'violet' },
+    noDueDate: { label: 'UNSCHEDULED_DATA', items: [], variant: 'lime' },
   }
 
   for (const item of tasks) {
@@ -43,7 +46,7 @@ export default function TasksPage({ onCreateTask }) {
   const standaloneTasks = useStore((state) => state.standaloneTasks)
 
   const [search, setSearch] = useState('')
-  const [selectedTaskItem, setSelectedTaskItem] = useState(null)
+  const [selectedTaskId, setSelectedTaskId] = useState(null)
   const [sortBy, setSortBy] = useState('newest')
 
   const allTasks = useMemo(() => {
@@ -83,14 +86,13 @@ export default function TasksPage({ onCreateTask }) {
       })
     }
 
-    // Sort
     const priorityRank = { high: 3, medium: 2, low: 1 }
     const copy = [...result]
     copy.sort((a, b) => {
       if (sortBy === 'priority') return (priorityRank[b.task.settings?.priority || 'medium'] || 0) - (priorityRank[a.task.settings?.priority || 'medium'] || 0)
       if (sortBy === 'dueDate') return (a.task.settings?.dueDate || '9999').localeCompare(b.task.settings?.dueDate || '9999')
       if (sortBy === 'oldest') return new Date(a.task.createdAt || 0) - new Date(b.task.createdAt || 0)
-      return new Date(b.task.createdAt || 0) - new Date(a.task.createdAt || 0) // newest
+      return new Date(b.task.createdAt || 0) - new Date(a.task.createdAt || 0)
     })
 
     return copy
@@ -98,111 +100,147 @@ export default function TasksPage({ onCreateTask }) {
 
   const taskGroups = useMemo(() => groupTasksByDate(filteredTasks), [filteredTasks])
 
-  // Keep selected task in sync with store
-  useEffect(() => {
-    if (selectedTaskItem) {
-      // Verify the task still exists
-      const exists = allTasks.find(
-        (item) => item.task.id === selectedTaskItem.task.id
-      )
-      if (!exists) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setSelectedTaskItem(null)
-      } else if (exists !== selectedTaskItem) {
-        setSelectedTaskItem(exists)
-      }
-    }
-  }, [allTasks, selectedTaskItem])
+  const selectedTaskItem = useMemo(() => {
+    if (!selectedTaskId) return null
+    return allTasks.find((item) => item.task.id === selectedTaskId) || null
+  }, [allTasks, selectedTaskId])
 
   return (
-    <div className="flex h-full min-w-0">
+    <div className="flex h-full min-w-0 relative overflow-hidden">
       {/* Main task list */}
-      <main className="flex-1 flex flex-col min-w-0">
+      <main className="flex-1 flex flex-col min-w-0 z-10 relative">
         {/* Header */}
-        <header className="h-14 px-6 flex items-center justify-between border-b border-border bg-bg-base/95 backdrop-blur sticky top-0 z-10">
-          <h1 className="text-lg font-bold flex items-center gap-2">
-            <Inbox className="h-5 w-5 text-text-muted" />
-            All Tasks
-          </h1>
-          <div className="flex items-center gap-2">
-            {/* Search */}
+        <header className="h-[88px] px-8 flex items-center justify-between border-b border-cyber-blue/20 bg-surface-high/40 backdrop-blur-2xl sticky top-0 z-20">
+          <div className="flex items-center gap-6">
             <div className="relative group">
-              <Search className="absolute left-2.5 top-2 text-text-muted group-focus-within:text-primary transition-colors h-4 w-4" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search tasks..."
-                className="bg-surface-light border border-transparent border-border rounded-lg pl-9 pr-3 py-1.5 w-48 focus:w-64 transition-all duration-300 focus:ring-1 focus:ring-primary focus:border-primary text-sm placeholder-text-muted text-text-primary outline-none"
-              />
+              <div className="absolute -inset-1 bg-cyber-blue/20 blur opacity-0 group-hover:opacity-100 transition duration-1000"></div>
+              <div className="flex items-center gap-4 relative">
+                <div className="p-2 bg-cyber-blue/10 border border-cyber-blue/30 rounded-sm">
+                  <Terminal className="h-6 w-6 text-cyber-blue animate-pulse" />
+                </div>
+                <div className="flex flex-col">
+                  <h1 className="font-orbitron text-lg font-black uppercase tracking-[0.3em] text-white">
+                    Task_Subsystem
+                  </h1>
+                  <span className="font-mono text-[9px] text-cyber-blue/60 uppercase tracking-widest leading-none">
+                    Stream_Active // {allTasks.length} Nodes
+                  </span>
+                </div>
+              </div>
             </div>
+          </div>
+
+          <div className="flex items-center gap-5">
+            {/* Search */}
+            <CyberInput
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="SCAN_DATA_STREAM..."
+              variant="blue"
+              icon={Search}
+              className="!w-64"
+            />
+
             {/* Sort */}
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="bg-surface-light border border-border rounded-lg px-3 py-1.5 text-sm text-text-secondary outline-none hover:border-border-light transition-colors"
-            >
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-              <option value="priority">Priority</option>
-              <option value="dueDate">Due Date</option>
-            </select>
-            {/* Create task */}
-            <button
-              type="button"
+            <div className="flex items-center gap-2 bg-surface-low/50 border border-white/10 p-1 rounded-sm">
+              <Filter className="h-3.5 w-3.5 text-surface-variant ml-2" />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="bg-transparent text-white font-mono text-[10px] uppercase tracking-widest outline-none cursor-pointer p-1"
+              >
+                <option value="newest">TS_NEW</option>
+                <option value="oldest">TS_OLD</option>
+                <option value="priority">PRIORITY</option>
+                <option value="dueDate">CHRONO</option>
+              </select>
+            </div>
+
+            <div className="w-[1px] h-8 bg-white/10 mx-2" />
+
+            <CyberButton
+              variant="blue"
+              size="md"
+              icon={Plus}
               onClick={() => onCreateTask(null, null)}
-              className="flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white px-3 py-1.5 rounded-lg text-sm font-medium shadow-lg shadow-primary/20 transition-all"
+              className="px-6"
             >
-              <Plus className="h-4 w-4" />
-              New Task
-            </button>
+              INIT_NODE
+            </CyberButton>
           </div>
         </header>
 
-        {/* Task list */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-2 scroll-smooth custom-scrollbar">
+        {/* Task list content */}
+        <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
           {filteredTasks.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-text-muted">
-              <Inbox className="h-12 w-12 mb-3 opacity-30" />
-              <p className="text-sm">No tasks found</p>
-              <button
-                type="button"
+            <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto text-center space-y-6">
+              <div className="relative inline-block">
+                <div className="absolute inset-0 bg-cyber-blue blur-xl opacity-20 animate-pulse" />
+                <Inbox className="relative h-20 w-20 text-surface-highest mx-auto opacity-30" />
+              </div>
+              <div className="space-y-2">
+                <p className="font-orbitron text-xs font-bold text-white uppercase tracking-[0.3em]">
+                  Data Stream Empty
+                </p>
+                <p className="font-mono text-[10px] text-surface-variant uppercase tracking-widest">
+                  No active nodes detected in the current filter context. Waiting for operator input.
+                </p>
+              </div>
+              <CyberButton
+                variant="blue"
+                className="mt-4"
                 onClick={() => onCreateTask(null, null)}
-                className="mt-3 flex items-center gap-1.5 text-primary text-sm font-medium hover:text-primary-light transition-colors"
+                icon={Zap}
               >
-                <Plus className="h-4 w-4" />
-                Create your first task
-              </button>
+                Deploy First Node
+              </CyberButton>
             </div>
           ) : (
-            taskGroups.map((group) => (
-              <div key={group.label}>
-                <div className="flex items-center justify-between px-2 pt-4 pb-1 text-xs font-medium text-text-muted">
-                  <span className="uppercase tracking-wider">{group.label}</span>
-                  <span className="font-mono text-[10px] bg-surface-light px-1.5 py-0.5 rounded text-text-muted">
-                    {group.items.length} {group.items.length === 1 ? 'task' : 'tasks'}
-                  </span>
+            <div className="max-w-7xl mx-auto space-y-12 pb-12">
+              {taskGroups.map((group) => (
+                <div key={group.label} className="space-y-6 relative">
+                  {/* Group Header */}
+                  <div className="flex items-center gap-4 sticky top-0 bg-[#0a0a0f]/90 backdrop-blur-md py-3 z-10 border-y border-white/5 shadow-2xl -mx-4 px-4">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-2 h-2 rounded-full bg-cyber-${group.variant} shadow-neon-${group.variant} animate-pulse`} />
+                      <span className={`font-orbitron text-xs font-black text-white uppercase tracking-[0.3em]`}>
+                        {group.label}
+                      </span>
+                      <CyberBadge variant={group.variant} size="xs" className="ml-2">
+                        {group.items.length} ACTIVE
+                      </CyberBadge>
+                    </div>
+                    <div className={`h-[1px] flex-1 bg-gradient-to-r from-cyber-${group.variant}/30 to-transparent`} />
+                  </div>
+                  
+                  {/* Grid of tasks */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                    {group.items.map((item) => (
+                      <div 
+                        key={item.task.id}
+                        className={`transition-all duration-300 ${selectedTaskId === item.task.id ? 'scale-[1.02] z-20 relative' : 'hover:scale-[1.01] hover:z-10'}`}
+                      >
+                        <TaskListItem
+                          item={item}
+                          isSelected={selectedTaskId === item.task.id}
+                          onSelect={() => setSelectedTaskId(item.task.id)}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  {group.items.map((item) => (
-                    <TaskListItem
-                      key={item.task.id}
-                      item={item}
-                      isSelected={selectedTaskItem?.task.id === item.task.id}
-                      onSelect={() => setSelectedTaskItem(item)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
       </main>
 
-      {/* Detail panel */}
+      {/* Detail panel overlay */}
       {selectedTaskItem && (
         <TaskDetailPanel
+          key={selectedTaskItem.task.id}
           taskItem={selectedTaskItem}
-          onClose={() => setSelectedTaskItem(null)}
+          onClose={() => setSelectedTaskId(null)}
         />
       )}
     </div>

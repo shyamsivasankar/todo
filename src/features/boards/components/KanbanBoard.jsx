@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
 import ColumnLane from './ColumnLane'
+import CyberCard from '../../../components/ui/CyberCard'
+import { Terminal } from 'lucide-react'
 
 const priorityRank = { high: 3, medium: 2, low: 1 }
 
@@ -59,14 +61,21 @@ export default function KanbanBoard({ board, onCreateTask, searchQuery = '', fil
 
   if (!board) {
     return (
-      <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border bg-surface/40 text-sm text-text-muted">
-        Create or select a board to start planning work.
+      <div className="flex h-full items-center justify-center p-12">
+        <CyberCard variant="blue" glow={false} padding="p-12" className="bg-surface-low border-dashed border-white/10 opacity-50">
+          <div className="flex flex-col items-center gap-4">
+            <Terminal className="h-12 w-12 text-cyber-blue animate-pulse" />
+            <span className="font-orbitron text-xs font-bold text-surface-variant uppercase tracking-[0.3em] text-center">
+              [ SELECT_MATRIX_FOR_DATA_VISUALIZATION ]
+            </span>
+          </div>
+        </CyberCard>
       </div>
     )
   }
 
   return (
-    <div className="flex h-full gap-6 overflow-x-auto pb-2 custom-scrollbar">
+    <div className="flex h-full gap-4 overflow-x-auto pb-4 custom-scrollbar">
       {columnsWithFilteredTasks.map((column, index) => (
         <ColumnLane
           key={column.id}

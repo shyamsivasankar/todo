@@ -1,8 +1,16 @@
-import { ArrowRight, Plus, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { Plus, X, Terminal, Activity, Flag, Folder, Calendar } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useStore } from '../../../store/useStore'
+import CyberModal from '../../../components/ui/CyberModal'
+import CyberInput from '../../../components/ui/CyberInput'
+import CyberButton from '../../../components/ui/CyberButton'
+import MarkdownEditor from '../../../components/ui/MarkdownEditor'
 
-const priorityOptions = ['low', 'medium', 'high']
+const priorityOptions = [
+  { value: 'low', label: 'STABLE' },
+  { value: 'medium', label: 'ACTIVE' },
+  { value: 'high', label: 'CRITICAL' },
+]
 
 export default function CreateTaskModal({
   open,
@@ -12,231 +20,154 @@ export default function CreateTaskModal({
 }) {
   const boards = useStore((state) => state.boards)
   const defaultTaskPriority = useStore((state) => state.uiSettings.defaultTaskPriority)
-  const addTask = useStore((state) => state.addTask)
+  const createTask = useStore((state) => state.createTask)
 
-  const [formState, setFormState] = useState({
-    boardId: '',
-    columnId: '',
-    heading: '',
-    tldr: '',
-    description: '',
-    priority: 'medium',
-    tags: '',
-    dueDate: '',
-  })
+  const [heading, setHeading] = useState('')
+  const [tldr, setTldr] = useState('')
+  const [description, setDescription] = useState('')
+  const [priority, setPriority] = useState(defaultTaskPriority || 'medium')
+  const [boardId, setBoardId] = useState(defaultBoardId || '')
+  const [columnId, setColumnId] = useState(defaultColumnId || '')
+  const [dueDate, setDueDate] = useState('')
 
-  useEffect(() => {
-    if (!open) return
+  const availableColumns = useMemo(() => {
+    if (!boardId) return []
+    const board = boards.find((b) => b.id === boardId)
+    return board?.columns || []
+  }, [boardId, boards])
 
-    const fallbackBoardId = defaultBoardId || boards[0]?.id || ''
-    const board = boards.find((item) => item.id === fallbackBoardId) || boards[0] || null
-    const fallbackColumnId =
-      defaultColumnId && board?.columns.find((col) => col.id === defaultColumnId)
-        ? defaultColumnId
-        : board?.columns[0]?.id || ''
+  const handleBoardChange = (e) => {
+    const newBoardId = e.target.value
+    setBoardId(newBoardId)
+    
+    if (newBoardId) {
+      const board = boards.find((b) => b.id === newBoardId)
+      if (board && board.columns.length > 0) {
+        setColumnId(board.columns[0].id)
+      }
+    } else {
+      setColumnId('')
+    }
+  }
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFormState({
-      boardId: board?.id || '',
-      columnId: fallbackColumnId,
-      heading: '',
-      tldr: '',
-      description: '',
-      priority: defaultTaskPriority || 'medium',
-      tags: '',
-      dueDate: '',
-    })
-  }, [open, defaultBoardId, defaultColumnId, boards, defaultTaskPriority])
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (!heading.trim()) return
 
-  const selectedBoard = useMemo(
-    () => boards.find((board) => board.id === formState.boardId) || null,
-    [boards, formState.boardId],
-  )
-
-  const onSubmit = () => {
-    if (!formState.heading?.trim()) return
-
-    addTask(formState.boardId || null, formState.columnId || null, {
-      heading: formState.heading,
-      tldr: formState.tldr,
-      description: formState.description,
-      settings: {
-        priority: formState.priority,
-        tags: formState.tags
-          .split(',')
-          .map((tag) => tag.trim())
-          .filter(Boolean),
-        dueDate: formState.dueDate,
-        status: formState.boardId ? undefined : 'To Do',
+    createTask(
+      boardId || null,
+      columnId || null,
+      heading.trim(),
+      tldr.trim(),
+      description.trim(),
+      {
+        priority,
+        dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
       },
-    })
-
+    )
     onClose()
   }
 
-  if (!open) return null
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg-deep/80 backdrop-blur-sm">
-      <div className="w-full max-w-2xl rounded-xl border border-border bg-surface shadow-2xl">
-        {/* Header */}
-        <header className="flex items-center justify-between border-b border-border px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10 text-primary">
-              <Plus className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-white">Create Task</h2>
-              <p className="text-xs text-text-muted">Add a new task to your workspace</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-2 text-text-muted hover:text-white hover:bg-surface-light transition-colors"
+    <CyberModal
+      isOpen={open}
+      onClose={onClose}
+      title="Initialize New Node"
+      variant="blue"
+      maxWidth="max-w-3xl"
+    >
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <CyberInput
+          label="Task Heading"
+          placeholder="ENTER_TASK_HEADING..."
+          value={heading}
+          onChange={(e) => setHeading(e.target.value)}
+          autoFocus
+          required
+          icon={Terminal}
+        />
+
+        <CyberInput
+          label="Short Summary"
+          placeholder="SHORT_DATA_SUMMARY..."
+          value={tldr}
+          onChange={(e) => setTldr(e.target.value)}
+          variant="cyan"
+          icon={Activity}
+        />
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <CyberInput
+            label="Priority Level"
+            type="select"
+            value={priority}
+            onChange={(e) => setPriority(e.target.value)}
+            variant={priority === 'high' ? 'amber' : priority === 'low' ? 'lime' : 'blue'}
+            icon={Flag}
           >
-            <X className="h-5 w-5" />
-          </button>
-        </header>
+            {priorityOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </CyberInput>
 
-        {/* Body */}
-        <div className="grid grid-cols-1 gap-4 p-6 md:grid-cols-2">
-          {/* Board selector */}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-text-secondary">Board (Optional)</label>
-            <select
-              value={formState.boardId}
-              onChange={(event) => {
-                const boardId = event.target.value || ''
-                const board = boardId ? boards.find((item) => item.id === boardId) : null
-                setFormState((prev) => ({
-                  ...prev,
-                  boardId,
-                  columnId: board?.columns[0]?.id || '',
-                }))
-              }}
-              className="w-full rounded-lg border border-border bg-surface-light px-3 py-2.5 text-sm text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            >
-              <option value="">No Board (Standalone Task)</option>
-              {boards.map((board) => (
-                <option key={board.id} value={board.id}>{board.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Status/Column selector */}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-text-secondary">Status</label>
-            {formState.boardId ? (
-              <select
-                value={formState.columnId}
-                onChange={(e) => setFormState((prev) => ({ ...prev, columnId: e.target.value }))}
-                className="w-full rounded-lg border border-border bg-surface-light px-3 py-2.5 text-sm text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-              >
-                {(selectedBoard?.columns || []).map((col) => (
-                  <option key={col.id} value={col.id}>{col.title}</option>
-                ))}
-              </select>
-            ) : (
-              <input
-                value="To Do"
-                disabled
-                className="w-full rounded-lg border border-border bg-surface-light/50 px-3 py-2.5 text-sm text-text-muted outline-none"
-              />
-            )}
-          </div>
-
-          {/* Heading */}
-          <div className="md:col-span-2">
-            <label className="mb-1.5 block text-xs font-medium text-text-secondary">Heading *</label>
-            <input
-              value={formState.heading}
-              onChange={(e) => setFormState((prev) => ({ ...prev, heading: e.target.value }))}
-              placeholder="Task heading (required)"
-              className="w-full rounded-lg border border-border bg-surface-light px-3 py-2.5 text-sm text-white placeholder:text-text-muted outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            />
-          </div>
-
-          {/* TL;DR */}
-          <div className="md:col-span-2">
-            <label className="mb-1.5 block text-xs font-medium text-text-secondary">TL;DR</label>
-            <input
-              value={formState.tldr}
-              onChange={(e) => setFormState((prev) => ({ ...prev, tldr: e.target.value }))}
-              placeholder="Brief summary"
-              className="w-full rounded-lg border border-border bg-surface-light px-3 py-2.5 text-sm text-white placeholder:text-text-muted outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            />
-          </div>
-
-          {/* Description */}
-          <div className="md:col-span-2">
-            <label className="mb-1.5 block text-xs font-medium text-text-secondary">Description</label>
-            <textarea
-              rows={4}
-              value={formState.description}
-              onChange={(e) => setFormState((prev) => ({ ...prev, description: e.target.value }))}
-              placeholder="Detailed description..."
-              className="w-full resize-none rounded-lg border border-border bg-surface-light px-3 py-2.5 text-sm text-white placeholder:text-text-muted outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            />
-          </div>
-
-          {/* Priority */}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-text-secondary">Priority</label>
-            <select
-              value={formState.priority}
-              onChange={(e) => setFormState((prev) => ({ ...prev, priority: e.target.value }))}
-              className="w-full rounded-lg border border-border bg-surface-light px-3 py-2.5 text-sm text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            >
-              {priorityOptions.map((p) => (
-                <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Due Date */}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-text-secondary">Due Date</label>
-            <input
-              type="date"
-              value={formState.dueDate}
-              onChange={(e) => setFormState((prev) => ({ ...prev, dueDate: e.target.value }))}
-              className="w-full rounded-lg border border-border bg-surface-light px-3 py-2.5 text-sm text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            />
-          </div>
-
-          {/* Tags */}
-          <div className="md:col-span-2">
-            <label className="mb-1.5 block text-xs font-medium text-text-secondary">Tags (comma separated)</label>
-            <input
-              value={formState.tags}
-              onChange={(e) => setFormState((prev) => ({ ...prev, tags: e.target.value }))}
-              placeholder="frontend, bug, blocker"
-              className="w-full rounded-lg border border-border bg-surface-light px-3 py-2.5 text-sm text-white placeholder:text-text-muted outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            />
-          </div>
+          <CyberInput
+            label="Due Date"
+            type="datetime-local"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            icon={Calendar}
+          />
         </div>
 
-        {/* Footer */}
-        <div className="bg-black/20 px-6 py-4 flex items-center justify-end gap-3 border-t border-border">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <CyberInput
+            label="Target Sector"
+            type="select"
+            value={boardId}
+            onChange={handleBoardChange}
+            icon={Folder}
+          >
+            <option value="">STANDALONE_BUFFER</option>
+            {boards.map((b) => (
+              <option key={b.id} value={b.id}>{b.name.toUpperCase()}</option>
+            ))}
+          </CyberInput>
+
+          {boardId && (
+            <CyberInput
+              label="Process Stage"
+              type="select"
+              value={columnId}
+              onChange={(e) => setColumnId(e.target.value)}
+              icon={Terminal}
+            >
+              {availableColumns.map((c) => (
+                <option key={c.id} value={c.id}>{c.title.toUpperCase()}</option>
+              ))}
+            </CyberInput>
+          )}
+        </div>
+
+        <MarkdownEditor
+          label="Task Description"
+          value={description}
+          onChange={setDescription}
+          placeholder="DOCUMENT_PROCEDURES..."
+        />
+
+        <div className="flex justify-end gap-4 pt-4 border-t border-white/5">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-4 py-2 text-sm font-medium text-text-secondary hover:bg-white/5 transition-colors"
+            className="px-6 py-2 font-orbitron text-[10px] font-bold uppercase tracking-widest text-surface-variant hover:text-white transition-colors"
           >
             Cancel
           </button>
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={!formState.heading?.trim()}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2 text-sm font-medium text-white shadow-lg shadow-primary/30 hover:bg-primary-dark transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <span>Create Task</span>
-            <ArrowRight className="h-4 w-4" />
-          </button>
+          <CyberButton type="submit" variant="blue" icon={Plus}>
+            Create Task
+          </CyberButton>
         </div>
-      </div>
-    </div>
+      </form>
+    </CyberModal>
   )
 }

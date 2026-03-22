@@ -101,6 +101,7 @@ export const useStore = create(
   subscribeWithSelector((set) => ({
     boards: [],
     standaloneTasks: [],
+    notes: [],
     activeBoardId: null,
     selectedTask: null,
     deletedTasks: [],
@@ -108,7 +109,7 @@ export const useStore = create(
     hydrationComplete: false,
     activeView: 'boards',
 
-    hydrateBoards: (boards, savedActiveBoardId = null, standaloneTasks = []) =>
+    hydrateBoards: (boards, savedActiveBoardId = null, standaloneTasks = [], notes = []) =>
       set((state) => {
         const ensureTaskExtendedData = (task) => ({
           ...task,
@@ -130,6 +131,11 @@ export const useStore = create(
           ensureTaskExtendedData,
         )
 
+        const safeNotes = (Array.isArray(notes) ? notes : []).map(n => ({
+          ...n,
+          taskIds: Array.isArray(n.taskIds) ? n.taskIds : []
+        }))
+
         // Use saved activeBoardId if available and valid, otherwise default to first board
         const activeBoardId =
           savedActiveBoardId && safeBoards.some((b) => b.id === savedActiveBoardId)
@@ -138,6 +144,7 @@ export const useStore = create(
         const newState = {
           boards: safeBoards,
           standaloneTasks: safeStandaloneTasks,
+          notes: safeNotes,
           activeBoardId,
           uiSettings: {
             ...state.uiSettings,
@@ -185,6 +192,49 @@ export const useStore = create(
       }),
 
     setActiveView: (view) => set({ activeView: view }),
+
+    // Notes Actions
+    createNote: (title, content) => {
+      const id = uuidv4()
+      set((state) => {
+        const newNote = {
+          id,
+          title: title || 'Neural Node',
+          content: content || '',
+          taskIds: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+        return { notes: [newNote, ...state.notes] }
+      })
+      return id
+    },
+
+    updateNote: (id, updates) => set((state) => ({
+      notes: state.notes.map(n => n.id === id ? { ...n, ...updates, updatedAt: new Date().toISOString() } : n)
+    })),
+
+    removeNote: (id) => set((state) => ({
+      notes: state.notes.filter(n => n.id !== id)
+    })),
+
+    linkNoteToTask: (noteId, taskId) => set((state) => ({
+      notes: state.notes.map(n => {
+        if (n.id === noteId && !n.taskIds.includes(taskId)) {
+          return { ...n, taskIds: [...n.taskIds, taskId], updatedAt: new Date().toISOString() }
+        }
+        return n
+      })
+    })),
+
+    unlinkNoteFromTask: (noteId, taskId) => set((state) => ({
+      notes: state.notes.map(n => {
+        if (n.id === noteId) {
+          return { ...n, taskIds: n.taskIds.filter(id => id !== taskId), updatedAt: new Date().toISOString() }
+        }
+        return n
+      })
+    })),
 
     createBoard: (boardName, columnTitles) => {
       const result = set((state) => {
@@ -499,6 +549,277 @@ export const useStore = create(
 
     closeTaskDetail: () => set({ selectedTask: null }),
 
+    moveTaskToBoard: (sourceBoardId, sourceColumnId, taskId, targetBoardId, targetColumnId) => {
+      set((state) => {
+        // Remove from source
+        let taskToMove = null
+        if (sourceBoardId && sourceColumnId) {
+          const nextBoards = state.boards.map((board) => {
+            if (board.id !== sourceBoardId) return board
+            const task = board.columns
+              .find((c) => c.id === sourceColumnId)
+              ?.tasks.find((t) => t.id === taskId)
+            if (task) taskToMove = task
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== sourceColumnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.filter((t) => t.id !== taskId),
+                }
+              }),
+            }
+          })
+          state.boards = nextBoards
+        } else {
+          taskToMove = state.standaloneTasks.find((t) => t.id === taskId)
+          state.standaloneTasks = state.standaloneTasks.filter((t) => t.id !== taskId)
+        }
+
+        if (!taskToMove) return state
+
+        // Add to target
+        if (targetBoardId && targetColumnId) {
+          const nextBoards = state.boards.map((board) => {
+            if (board.id !== targetBoardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== targetColumnId) return column
+                return {
+                  ...column,
+                  tasks: [taskToMove, ...column.tasks],
+                }
+              }),
+            }
+          })
+          return { boards: nextBoards }
+        } else {
+          return { standaloneTasks: [taskToMove, ...state.standaloneTasks] }
+        }
+      })
+    },
+
+    addTaskChecklistItem: (boardId, columnId, taskId, checklistId, item) => {
+      set((state) => {
+        const updateFn = (task) => {
+          const checklists = task.extendedData?.checklists || []
+          const updatedChecklists = checklists.map((cl) => {
+            if (cl.id === checklistId) {
+              return {
+                ...cl,
+                items: [...(cl.items || []), item],
+              }
+            }
+            return cl
+          })
+          return {
+            ...task,
+            extendedData: {
+              ...task.extendedData,
+              checklists: updatedChecklists,
+            },
+          }
+        }
+        if (!boardId || !columnId) {
+          return {
+            standaloneTasks: state.standaloneTasks.map((task) =>
+              task.id === taskId ? updateFn(task) : task
+            ),
+          }
+        }
+        return {
+          boards: state.boards.map((board) => {
+            if (board.id !== boardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== columnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.map((task) =>
+                    task.id === taskId ? updateFn(task) : task
+                  ),
+                }
+              }),
+            }
+          }),
+        }
+      })
+    },
+
+    updateTaskChecklist: (boardId, columnId, taskId, checklistId, updates) => {
+      set((state) => {
+        const updateFn = (task) => {
+          const checklists = task.extendedData?.checklists || []
+          const updatedChecklists = checklists.map((cl) => {
+            if (cl.id === checklistId) {
+              return { ...cl, ...updates }
+            }
+            return cl
+          })
+          return {
+            ...task,
+            extendedData: {
+              ...task.extendedData,
+              checklists: updatedChecklists,
+            },
+          }
+        }
+        if (!boardId || !columnId) {
+          return {
+            standaloneTasks: state.standaloneTasks.map((task) =>
+              task.id === taskId ? updateFn(task) : task
+            ),
+          }
+        }
+        return {
+          boards: state.boards.map((board) => {
+            if (board.id !== boardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== columnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.map((task) =>
+                    task.id === taskId ? updateFn(task) : task
+                  ),
+                }
+              }),
+            }
+          }),
+        }
+      })
+    },
+
+    removeTaskChecklistItem: (boardId, columnId, taskId, checklistId, itemId) => {
+      set((state) => {
+        const updateFn = (task) => {
+          const checklists = task.extendedData?.checklists || []
+          const updatedChecklists = checklists.map((cl) => {
+            if (cl.id === checklistId) {
+              return {
+                ...cl,
+                items: (cl.items || []).filter((item) => item.id !== itemId),
+              }
+            }
+            return cl
+          })
+          return {
+            ...task,
+            extendedData: {
+              ...task.extendedData,
+              checklists: updatedChecklists,
+            },
+          }
+        }
+        if (!boardId || !columnId) {
+          return {
+            standaloneTasks: state.standaloneTasks.map((task) =>
+              task.id === taskId ? updateFn(task) : task
+            ),
+          }
+        }
+        return {
+          boards: state.boards.map((board) => {
+            if (board.id !== boardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== columnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.map((task) =>
+                    task.id === taskId ? updateFn(task) : task
+                  ),
+                }
+              }),
+            }
+          }),
+        }
+      })
+    },
+
+    addTaskComment: (boardId, columnId, taskId, comment) => {
+      set((state) => {
+        const updateFn = (task) => {
+          const comments = task.extendedData?.comments || []
+          return {
+            ...task,
+            extendedData: {
+              ...task.extendedData,
+              comments: [...comments, comment],
+            },
+          }
+        }
+        if (!boardId || !columnId) {
+          return {
+            standaloneTasks: state.standaloneTasks.map((task) =>
+              task.id === taskId ? updateFn(task) : task
+            ),
+          }
+        }
+        return {
+          boards: state.boards.map((board) => {
+            if (board.id !== boardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== columnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.map((task) =>
+                    task.id === taskId ? updateFn(task) : task
+                  ),
+                }
+              }),
+            }
+          }),
+        }
+      })
+    },
+
+    removeTaskComment: (boardId, columnId, taskId, commentId) => {
+      set((state) => {
+        const updateFn = (task) => {
+          const comments = task.extendedData?.comments || []
+          return {
+            ...task,
+            extendedData: {
+              ...task.extendedData,
+              comments: comments.filter((c) => c.id !== commentId),
+            },
+          }
+        }
+        if (!boardId || !columnId) {
+          return {
+            standaloneTasks: state.standaloneTasks.map((task) =>
+              task.id === taskId ? updateFn(task) : task
+            ),
+          }
+        }
+        return {
+          boards: state.boards.map((board) => {
+            if (board.id !== boardId) return board
+            return {
+              ...board,
+              columns: board.columns.map((column) => {
+                if (column.id !== columnId) return column
+                return {
+                  ...column,
+                  tasks: column.tasks.map((task) =>
+                    task.id === taskId ? updateFn(task) : task
+                  ),
+                }
+              }),
+            }
+          }),
+        }
+      })
+    },
+
     notifications: [],
     unreadCount: 0,
 
@@ -555,13 +876,14 @@ export const attachBoardPersistence = () => {
       if (!state.hydrationComplete) return false
       const activeBoardId = state.activeBoardId
       if (window.electronAPI?.saveBoards) {
-        window.electronAPI.saveBoards(state.boards, activeBoardId, state.standaloneTasks)
+        window.electronAPI.saveBoards(state.boards, activeBoardId, state.standaloneTasks, state.notes)
       } else {
         localStorage.setItem(
           'todo_boards',
           JSON.stringify({
             boards: state.boards,
             standaloneTasks: state.standaloneTasks,
+            notes: state.notes,
             activeBoardId,
           }),
         )
@@ -607,6 +929,19 @@ export const attachBoardPersistence = () => {
     () => {
       if (standaloneTasksFirstEmit) {
         standaloneTasksFirstEmit = false
+        return
+      }
+      if (!useStore.getState().hydrationComplete) return
+      saveBoardsToDisk()
+    },
+  )
+
+  let notesFirstEmit = true
+  useStore.subscribe(
+    (state) => state.notes,
+    () => {
+      if (notesFirstEmit) {
+        notesFirstEmit = false
         return
       }
       if (!useStore.getState().hydrationComplete) return

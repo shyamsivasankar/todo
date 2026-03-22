@@ -498,10 +498,10 @@ export const boardOperations = {
       const insertColumn = db.prepare('INSERT INTO columns (id, board_id, title, position) VALUES (?, ?, ?, ?)')
       
       boards.forEach(board => {
-        insertBoard.run(board.id, board.name, board.createdAt || new Date().toISOString())
+        insertBoard.run(ensureString(board.id), ensureString(board.name), ensureString(board.createdAt || board.created_at || new Date().toISOString()))
         if (board.columns) {
           board.columns.forEach((col, index) => {
-            insertColumn.run(col.id, board.id, col.title, index)
+            insertColumn.run(ensureString(col.id), ensureString(board.id), ensureString(col.title), index)
             if (col.tasks) {
               col.tasks.forEach((task, taskIndex) => {
                 taskOperations.create({
@@ -531,7 +531,7 @@ export const boardOperations = {
 
       // Save activeBoardId to settings
       if (activeBoardId) {
-        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('activeBoardId', activeBoardId)
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('activeBoardId', ensureString(activeBoardId))
       }
     })
     transaction()
@@ -548,11 +548,20 @@ export const taskOperations = {
       extendedData, timeline, settings
     } = task
 
-    const priority = settings?.priority || task.priority || 'medium'
+    const safeId = ensureString(id)
+    if (!safeId) return
+
+    const priority = ensureString(settings?.priority || task.priority || 'medium')
     const tags = settings?.tags || task.tags || []
     const due_date = ensureString(settings?.dueDate || task.due_date || '')
-    const status = settings?.status || task.status || 'To Do'
-    const completed = settings?.completed !== undefined ? settings.completed : (task.completed ? 1 : 0)
+    const status = ensureString(settings?.status || task.status || 'To Do')
+    
+    let completed = 0
+    if (settings?.completed !== undefined) {
+      completed = settings.completed ? 1 : 0
+    } else if (task.completed !== undefined) {
+      completed = task.completed ? 1 : 0
+    }
 
     const insertTask = db.prepare(`
       INSERT INTO tasks (
@@ -562,39 +571,76 @@ export const taskOperations = {
     `)
 
     insertTask.run(
-      id, board_id || null, column_id || null, heading || 'Untitled Task', tldr || '', description || '',
-      priority, JSON.stringify(tags), due_date, 
-      status, completed ? 1 : 0, ensureString(created_at || new Date().toISOString()), position || 0
+      safeId, 
+      board_id ? ensureString(board_id) : null, 
+      column_id ? ensureString(column_id) : null, 
+      ensureString(heading || 'Untitled Task'), 
+      ensureString(tldr || ''), 
+      ensureString(description || ''),
+      priority, 
+      JSON.stringify(tags), 
+      due_date, 
+      status, 
+      completed, 
+      ensureString(created_at || task.created_at || new Date().toISOString()), 
+      Number.isInteger(position) ? position : 0
     )
 
     // Insert timeline
-    if (timeline) {
+    if (timeline && Array.isArray(timeline)) {
       const insertTimeline = db.prepare('INSERT INTO task_timeline (id, task_id, action, timestamp) VALUES (?, ?, ?, ?)')
       timeline.forEach(t => {
-        insertTimeline.run(uuidv4(), id, t.action, ensureString(t.timestamp))
+        if (t) {
+          insertTimeline.run(
+            uuidv4(), 
+            safeId, 
+            ensureString(t.action || ''), 
+            ensureString(t.timestamp || new Date().toISOString())
+          )
+        }
       })
     }
 
     // Insert checklists
     if (extendedData?.checklists) {
       const insertChecklist = db.prepare('INSERT INTO checklists (id, task_id, title, items) VALUES (?, ?, ?, ?)')
-      // Grouping all items into one checklist for now as the current UI shows one checklist
-      insertChecklist.run(uuidv4(), id, 'Checklist', JSON.stringify(extendedData.checklists))
+      insertChecklist.run(
+        uuidv4(), 
+        safeId, 
+        'Checklist', 
+        JSON.stringify(extendedData.checklists || [])
+      )
     }
 
     // Insert attachments
-    if (extendedData?.attachments) {
+    if (extendedData?.attachments && Array.isArray(extendedData.attachments)) {
       const insertAttachment = db.prepare('INSERT INTO attachments (id, task_id, url, title, cover_image, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       extendedData.attachments.forEach(a => {
-        insertAttachment.run(a.id || uuidv4(), id, a.url, a.title, a.coverImage ? 1 : 0, ensureString(a.createdAt || new Date().toISOString()))
+        if (a) {
+          insertAttachment.run(
+            ensureString(a.id || uuidv4()), 
+            safeId, 
+            ensureString(a.url || ''), 
+            ensureString(a.title || ''), 
+            a.coverImage ? 1 : 0, 
+            ensureString(a.createdAt || new Date().toISOString())
+          )
+        }
       })
     }
 
     // Insert comments
-    if (extendedData?.comments) {
+    if (extendedData?.comments && Array.isArray(extendedData.comments)) {
       const insertComment = db.prepare('INSERT INTO task_comments (id, task_id, text, created_at) VALUES (?, ?, ?, ?)')
       extendedData.comments.forEach(c => {
-        insertComment.run(c.id || uuidv4(), id, c.text, ensureString(c.createdAt || new Date().toISOString()))
+        if (c) {
+          insertComment.run(
+            ensureString(c.id || uuidv4()), 
+            safeId, 
+            ensureString(c.text || ''), 
+            ensureString(c.createdAt || new Date().toISOString())
+          )
+        }
       })
     }
   },
@@ -607,20 +653,20 @@ export const taskOperations = {
 
       if (updates.heading !== undefined) {
         fields.push('heading = ?')
-        values.push(updates.heading)
+        values.push(ensureString(updates.heading))
       }
       if (updates.tldr !== undefined) {
         fields.push('tldr = ?')
-        values.push(updates.tldr)
+        values.push(ensureString(updates.tldr))
       }
       if (updates.description !== undefined) {
         fields.push('description = ?')
-        values.push(updates.description)
+        values.push(ensureString(updates.description))
       }
       if (updates.settings) {
         if (updates.settings.priority !== undefined) {
           fields.push('priority = ?')
-          values.push(updates.settings.priority)
+          values.push(ensureString(updates.settings.priority))
         }
         if (updates.settings.tags !== undefined) {
           fields.push('tags = ?')
@@ -628,11 +674,11 @@ export const taskOperations = {
         }
         if (updates.settings.dueDate !== undefined) {
           fields.push('due_date = ?')
-          values.push(updates.settings.dueDate)
+          values.push(ensureString(updates.settings.dueDate))
         }
         if (updates.settings.status !== undefined) {
           fields.push('status = ?')
-          values.push(updates.settings.status)
+          values.push(ensureString(updates.settings.status))
         }
         if (updates.settings.completed !== undefined) {
           fields.push('completed = ?')
@@ -641,40 +687,52 @@ export const taskOperations = {
       }
 
       if (fields.length > 0) {
-        values.push(taskId)
+        values.push(ensureString(taskId))
         db.prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`).run(...values)
       }
 
       // Update timeline
       if (updates.timeline) {
         // We only add new timeline entries, don't replace
-        const existingCount = db.prepare('SELECT COUNT(*) as count FROM task_timeline WHERE task_id = ?').get(taskId).count
+        const existingCount = db.prepare('SELECT COUNT(*) as count FROM task_timeline WHERE task_id = ?').get(ensureString(taskId)).count
         const newEntries = updates.timeline.slice(existingCount)
         const insertTimeline = db.prepare('INSERT INTO task_timeline (id, task_id, action, timestamp) VALUES (?, ?, ?, ?)')
         newEntries.forEach(t => {
-          insertTimeline.run(uuidv4(), taskId, t.action, t.timestamp)
+          insertTimeline.run(uuidv4(), ensureString(taskId), ensureString(t.action), ensureString(t.timestamp))
         })
       }
 
       // Update extended data
       if (updates.extendedData) {
         if (updates.extendedData.checklists) {
-          db.prepare('DELETE FROM checklists WHERE task_id = ?').run(taskId)
+          db.prepare('DELETE FROM checklists WHERE task_id = ?').run(ensureString(taskId))
           const insertChecklist = db.prepare('INSERT INTO checklists (id, task_id, title, items) VALUES (?, ?, ?, ?)')
-          insertChecklist.run(uuidv4(), taskId, 'Checklist', JSON.stringify(updates.extendedData.checklists))
+          insertChecklist.run(uuidv4(), ensureString(taskId), 'Checklist', JSON.stringify(updates.extendedData.checklists))
         }
         if (updates.extendedData.attachments) {
-          db.prepare('DELETE FROM attachments WHERE task_id = ?').run(taskId)
+          db.prepare('DELETE FROM attachments WHERE task_id = ?').run(ensureString(taskId))
           const insertAttachment = db.prepare('INSERT INTO attachments (id, task_id, url, title, cover_image, created_at) VALUES (?, ?, ?, ?, ?, ?)')
           updates.extendedData.attachments.forEach(a => {
-            insertAttachment.run(a.id || uuidv4(), taskId, a.url, a.title, a.coverImage ? 1 : 0, a.createdAt || new Date().toISOString())
+            insertAttachment.run(
+              ensureString(a.id || uuidv4()), 
+              ensureString(taskId), 
+              ensureString(a.url), 
+              ensureString(a.title), 
+              a.coverImage ? 1 : 0, 
+              ensureString(a.createdAt || new Date().toISOString())
+            )
           })
         }
         if (updates.extendedData.comments) {
-          db.prepare('DELETE FROM task_comments WHERE task_id = ?').run(taskId)
+          db.prepare('DELETE FROM task_comments WHERE task_id = ?').run(ensureString(taskId))
           const insertComment = db.prepare('INSERT INTO task_comments (id, task_id, text, created_at) VALUES (?, ?, ?, ?)')
           updates.extendedData.comments.forEach(c => {
-            insertComment.run(c.id || uuidv4(), taskId, c.text, c.createdAt || new Date().toISOString())
+            insertComment.run(
+              ensureString(c.id || uuidv4()), 
+              ensureString(taskId), 
+              ensureString(c.text), 
+              ensureString(c.createdAt || new Date().toISOString())
+            )
           })
         }
       }
@@ -772,11 +830,11 @@ export const notificationOperations = {
       `)
       insert.run(
         uuidv4(),
-        taskId,
-        title,
-        body,
-        triggerType,
-        sentAt
+        ensureString(taskId),
+        ensureString(title),
+        ensureString(body),
+        ensureString(triggerType),
+        ensureString(sentAt)
       )
     } catch (error) {
       // If columns don't exist yet, skip logging (will work after migration)
