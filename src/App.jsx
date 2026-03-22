@@ -6,6 +6,7 @@ import AppSidebar from './features/layout/components/AppSidebar'
 import LoadingFallback from './components/LoadingFallback'
 import { attachBoardPersistence, useStore } from './store/useStore'
 import TaskCard from './features/tasks/components/TaskCard'
+import GlobalSearch from './features/search/components/GlobalSearch'
 
 // Lazy-loaded views
 const KanbanBoard = lazy(() => import('./features/boards/components/KanbanBoard'))
@@ -29,7 +30,6 @@ function App() {
   const hydrateBoards = useStore((state) => state.hydrateBoards)
   const hydrateDeletedTasks = useStore((state) => state.hydrateDeletedTasks)
   const hydrateSettings = useStore((state) => state.hydrateSettings)
-  const hydrateNotes = useStore((state) => state.hydrateNotes)
   const hydrationComplete = useStore((state) => state.hydrationComplete)
   const moveTask = useStore((state) => state.moveTask)
   const openTaskDetail = useStore((state) => state.openTaskDetail)
@@ -39,6 +39,7 @@ function App() {
   const setActiveView = useStore((state) => state.setActiveView)
 
   const [boardModalOpen, setBoardModalOpen] = useState(false)
+  const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [boardToEdit, setBoardToEdit] = useState(null)
   const [taskModalState, setTaskModalState] = useState({
     open: false,
@@ -69,6 +70,17 @@ function App() {
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "k") {
+        event.preventDefault()
+        setIsSearchOpen((isOpen) => !isOpen)
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
   }, [])
 
   const activeBoard = useMemo(
@@ -117,7 +129,6 @@ function App() {
         let boardsData = { boards: [], activeBoardId: null }
         let diskDeletedTasks = []
         let diskSettings = {}
-        let diskNotes = []
 
         if (window.electronAPI) {
           const electronBoards = await window.electronAPI.getBoards?.()
@@ -136,10 +147,6 @@ function App() {
           try {
             const stored = localStorage.getItem('todo_settings')
             if (stored) diskSettings = JSON.parse(stored)
-          } catch { /* ignore */ }
-          try {
-            const stored = localStorage.getItem('todo_notes')
-            if (stored) diskNotes = JSON.parse(stored)
           } catch { /* ignore */ }
         }
 
@@ -237,7 +244,8 @@ function App() {
     >
       <div className="flex flex-1 min-w-0 overflow-hidden">
         {/* Icon sidebar */}
-        <AppSidebar activeView={activeView} onChangeView={setActiveView} />
+        <AppSidebar activeView={activeView} onChangeView={setActiveView} onSearchClick={() => setIsSearchOpen(true)} />
+        <GlobalSearch isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />
 
         {/* Board View */}
         {activeView === 'boards' && (

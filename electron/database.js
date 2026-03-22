@@ -34,7 +34,6 @@ function initializeDatabase() {
     }
     
     const dbPath = path.join(userDataPath, 'kanban.db')
-    const notesPath = path.join(userDataPath, 'notes')
     
 
     // Skip actual file DB initialization if we are in a test environment and db is already set via _setDb

@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, shell, dialog, Notification } from '
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
-import { boardOperations, deletedTasksOperations, settingsOperations, taskOperations, notificationOperations, noteOperations, getDb } from './database.js'
+import { boardOperations, deletedTasksOperations, settingsOperations, taskOperations, notificationOperations, getDb } from './database.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -67,14 +67,6 @@ const DeletedTaskSchema = z.object({
 
 const SettingsSchema = z.record(z.any())
 
-const NoteSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  content: z.union([z.string(), z.record(z.any()), z.array(z.any())]).nullable().optional(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  taskIds: z.array(z.string()).optional(),
-})
 
 const FileOpenSchema = z.string()
 
@@ -415,78 +407,6 @@ app.whenReady().then(() => {
       notificationOperations.markAsRead(notificationId)
     } catch (error) {
       console.error('[IPC] Error in notifications:markAsRead:', error)
-    }
-  })
-
-  // Note operations
-  ipcMain.handle('notes:get', () => {
-    try {
-      return noteOperations.getAll()
-    } catch (error) {
-      console.error('[IPC] Error in notes:get:', error)
-      return []
-    }
-  })
-
-  ipcMain.handle('notes:getContent', (_event, id) => {
-    try {
-      return noteOperations.getNoteContent(id)
-    } catch (error) {
-      console.error('[IPC] Error in notes:getContent:', error)
-      return null
-    }
-  })
-
-  ipcMain.on('notes:set', (_event, notes) => {
-    try {
-      const validatedNotes = z.array(NoteSchema).parse(notes)
-      noteOperations.saveAll(validatedNotes)
-    } catch (error) {
-      console.error('[IPC] Error in notes:set:', error)
-    }
-  })
-
-  ipcMain.handle('notes:create', (_event, note) => {
-    try {
-      const validatedNote = NoteSchema.parse(note)
-      noteOperations.create(validatedNote)
-      return { success: true }
-    } catch (error) {
-      console.error('[IPC] Error in notes:create:', error)
-      return { success: false, error: error.message }
-    }
-  })
-
-  ipcMain.on('notes:update', (_event, { id, updates }) => {
-    try {
-      const validatedUpdates = NoteSchema.partial().parse(updates)
-      noteOperations.update(id, validatedUpdates)
-    } catch (error) {
-      console.error('[IPC] Error in notes:update:', error)
-    }
-  })
-
-  ipcMain.on('notes:delete', (_event, id) => {
-    try {
-      noteOperations.delete(id)
-    } catch (error) {
-      console.error('[IPC] Error in notes:delete:', error)
-    }
-  })
-
-  ipcMain.on('notes:linkToTask', (_event, { noteId, taskId }) => {
-    try {
-      noteOperations.linkToTask(noteId, taskId)
-    } catch (error) {
-      console.error('[IPC] Error in notes:linkToTask:', error)
-    }
-  })
-
-  ipcMain.on('notes:unlinkFromTask', (_event, { noteId, taskId }) => {
-    try {
-      noteOperations.unlinkFromTask(noteId, taskId)
-    } catch (error) {
-      console.error('[IPC] Error in notes:unlinkFromTask:', error)
     }
   })
 

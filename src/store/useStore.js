@@ -104,7 +104,6 @@ export const useStore = create(
     activeBoardId: null,
     selectedTask: null,
     deletedTasks: [],
-    notes: [],
     uiSettings: defaultUiSettings,
     hydrationComplete: false,
     activeView: 'boards',
@@ -154,7 +153,11 @@ export const useStore = create(
         deletedTasks: Array.isArray(deletedTasks) ? deletedTasks : [],
       })),
 
-          // Always preserve activeBoardId from state if it exists
+    hydrateSettings: (settings) =>
+      set((state) => {
+        const newSettings = {
+          ...defaultUiSettings,
+          ...settings,
           activeBoardId: state.activeBoardId ?? (settings || {}).activeBoardId ?? null,
         }
         return {
@@ -183,12 +186,6 @@ export const useStore = create(
 
     setActiveView: (view) => set({ activeView: view }),
 
-
-
-
-
-
-
     createBoard: (boardName, columnTitles) => {
       const result = set((state) => {
         const name = boardName?.trim() || `Board ${state.boards.length + 1}`
@@ -199,7 +196,6 @@ export const useStore = create(
           createdAt: new Date().toISOString(),
         }
 
-        // Always switch to the newly created board
         const newActiveBoardId = nextBoard.id
         return {
           boards: [...state.boards, nextBoard],
@@ -208,35 +204,20 @@ export const useStore = create(
             ...state.uiSettings,
             activeBoardId: newActiveBoardId,
           },
-          // Preserve hydrationComplete to prevent showing loading state
           hydrationComplete: state.hydrationComplete,
         }
       })
-      // Direct save call after state update
       setTimeout(() => {
         const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) {
-          return
-        }
+        if (!currentState.hydrationComplete) return
         try {
-          // Use same save logic as saveBoardsToDisk - includes localStorage fallback
           if (window.electronAPI?.saveBoards) {
-            console.log('[Store] Saving boards via Electron API:', {
-              boardsCount: currentState.boards.length,
-              activeBoardId: currentState.activeBoardId,
-            })
             window.electronAPI.saveBoards(
               currentState.boards,
               currentState.activeBoardId,
               currentState.standaloneTasks,
             )
           } else {
-            // Fallback to localStorage when Electron is not available
-            console.log('[Store] Saving boards to localStorage:', {
-              boardsCount: currentState.boards.length,
-              standaloneTasksCount: currentState.standaloneTasks.length,
-              activeBoardId: currentState.activeBoardId,
-            })
             localStorage.setItem(
               'todo_boards',
               JSON.stringify({
@@ -258,7 +239,6 @@ export const useStore = create(
         const board = state.boards.find((b) => b.id === boardId)
         if (!board) return state
 
-        // Move all tasks from this board into standaloneTasks (boardless, not deleted)
         const tasksToStandalone = []
         for (const column of board.columns || []) {
           for (const task of column.tasks || []) {
@@ -266,413 +246,138 @@ export const useStore = create(
               ...task,
               timeline: [
                 ...(task.timeline || []),
-                createTimelineEntry(`Moved to My Tasks (board "${board.name}" removed)`),
+                createTimelineEntry(`Board ${board.name} was removed. Task moved to standalone.`),
               ],
             })
           }
         }
-        const newStandaloneTasks = [...state.standaloneTasks, ...tasksToStandalone]
 
-        const updatedBoards = state.boards.filter((b) => b.id !== boardId)
-        let newActiveBoardId = state.activeBoardId
-        if (state.activeBoardId === boardId) {
-          newActiveBoardId = updatedBoards.length > 0 ? updatedBoards[0].id : null
-        }
+        const nextBoards = state.boards.filter((b) => b.id !== boardId)
+        const nextActiveBoardId =
+          state.activeBoardId === boardId ? nextBoards[0]?.id ?? null : state.activeBoardId
 
         return {
-          boards: updatedBoards,
-          standaloneTasks: newStandaloneTasks,
-          activeBoardId: newActiveBoardId,
+          boards: nextBoards,
+          standaloneTasks: [...state.standaloneTasks, ...tasksToStandalone],
+          activeBoardId: nextActiveBoardId,
           uiSettings: {
             ...state.uiSettings,
-            activeBoardId: newActiveBoardId,
+            activeBoardId: nextActiveBoardId,
           },
-          selectedTask:
-            state.selectedTask && state.selectedTask.boardId === boardId
-              ? null
-              : state.selectedTask,
         }
       })
-      // Direct save call after state update
-      setTimeout(() => {
-        const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) {
-          return
-        }
-        try {
-          // Use same save logic as saveBoardsToDisk - includes localStorage fallback
-          if (window.electronAPI?.saveBoards) {
-            console.log('[Store] Saving boards via Electron API after removeBoard:', {
-              boardsCount: currentState.boards.length,
-              activeBoardId: currentState.activeBoardId,
-            })
-            window.electronAPI.saveBoards(currentState.boards, currentState.activeBoardId)
-          } else {
-            // Fallback to localStorage when Electron is not available
-            console.log('[Store] Saving boards to localStorage after removeBoard:', {
-              boardsCount: currentState.boards.length,
-              activeBoardId: currentState.activeBoardId,
-            })
-            localStorage.setItem(
-              'todo_boards',
-              JSON.stringify({
-                boards: currentState.boards,
-                standaloneTasks: currentState.standaloneTasks,
-                activeBoardId: currentState.activeBoardId,
-              }),
-            )
-          }
-        } catch (error) {
-          console.error('[Store] Error in direct save after removeBoard:', error)
-        }
-      }, 100)
       return result
     },
 
-    renameBoard: (boardId, name) => {
+    renameBoard: (boardId, newName) => {
       const result = set((state) => ({
-        boards: state.boards.map((board) =>
-          board.id === boardId ? { ...board, name: name.trim() || board.name } : board,
-        ),
+        boards: state.boards.map((b) => (b.id === boardId ? { ...b, name: newName } : b)),
       }))
-      // Direct save call after state update
-      setTimeout(() => {
-        const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) {
-          return
-        }
-        try {
-          if (window.electronAPI?.saveBoards) {
-            window.electronAPI.saveBoards(
-              currentState.boards,
-              currentState.activeBoardId,
-              currentState.standaloneTasks,
-            )
-          } else {
-            localStorage.setItem(
-              'todo_boards',
-              JSON.stringify({
-                boards: currentState.boards,
-                standaloneTasks: currentState.standaloneTasks,
-                activeBoardId: currentState.activeBoardId,
-              }),
-            )
-          }
-        } catch (error) {
-          console.error('[Store] Error in direct save after renameBoard:', error)
-        }
-      }, 100)
       return result
     },
 
-    addColumn: (boardId, title) => {
-      const result = set((state) => ({
-        boards: state.boards.map((board) => {
-          if (board.id !== boardId) {
-            return board
-          }
-
-          return {
-            ...board,
-            columns: [
-              ...board.columns,
-              {
-                id: uuidv4(),
-                title: title?.trim() || 'New Status',
-                tasks: [],
-              },
-            ],
-          }
-        }),
-      }))
-      // Direct save call after state update
-      setTimeout(() => {
-        const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) {
-          return
-        }
-        try {
-          if (window.electronAPI?.saveBoards) {
-            window.electronAPI.saveBoards(
-              currentState.boards,
-              currentState.activeBoardId,
-              currentState.standaloneTasks,
-            )
-          } else {
-            localStorage.setItem(
-              'todo_boards',
-              JSON.stringify({
-                boards: currentState.boards,
-                standaloneTasks: currentState.standaloneTasks,
-                activeBoardId: currentState.activeBoardId,
-              }),
-            )
-          }
-        } catch (error) {
-          console.error('[Store] Error in direct save after addColumn:', error)
-        }
-      }, 100)
-      return result
-    },
-
-    renameColumn: (boardId, columnId, nextTitle) => {
-      const result = set((state) => ({
-        boards: state.boards.map((board) => {
-          if (board.id !== boardId) {
-            return board
-          }
-
-          return {
-            ...board,
-            columns: board.columns.map((column) =>
-              column.id === columnId
-                ? {
-                    ...column,
-                    title: nextTitle?.trim() || column.title,
-                    tasks: column.tasks.map((task) => ({
-                      ...task,
-                      settings: { ...task.settings, status: nextTitle?.trim() || column.title },
-                    })),
-                  }
-                : column,
-            ),
-          }
-        }),
-      }))
-      // Direct save call after state update
-      setTimeout(() => {
-        const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) {
-          return
-        }
-        try {
-          if (window.electronAPI?.saveBoards) {
-            window.electronAPI.saveBoards(
-              currentState.boards,
-              currentState.activeBoardId,
-              currentState.standaloneTasks,
-            )
-          } else {
-            localStorage.setItem(
-              'todo_boards',
-              JSON.stringify({
-                boards: currentState.boards,
-                standaloneTasks: currentState.standaloneTasks,
-                activeBoardId: currentState.activeBoardId,
-              }),
-            )
-          }
-        } catch (error) {
-          console.error('[Store] Error in direct save after renameColumn:', error)
-        }
-      }, 100)
-      return result
-    },
-
-    addTask: (boardId, columnId, payload) => {
-      const taskId = uuidv4()
-      const createdAt = new Date().toISOString()
-      let taskForApi = null
-      let position = 0
-
+    createTask: (boardId, columnId, taskHeading, taskTldr, taskDescription, taskSettings) => {
       const result = set((state) => {
-        // If boardId and columnId are null, create a standalone task
-        if (!boardId || !columnId) {
-          position = state.standaloneTasks.length
-          const task = {
-            id: taskId,
-            heading: payload.heading?.trim() || 'Untitled Task',
-            tldr: payload.tldr?.trim() || '',
-            description: payload.description?.trim() || '',
-            createdAt,
-            settings: {
-              ...defaultTaskSettings,
-              ...payload.settings,
-              status: payload.settings?.status || 'To Do',
-            },
-            extendedData: { ...defaultExtendedData, ...(payload.extendedData || {}) },
-            timeline: [createTimelineEntry('Created as standalone task')],
-          }
-
-          taskForApi = {
-            id: task.id,
-            board_id: null,
-            column_id: null,
-            isStandalone: true,
-            heading: task.heading,
-            tldr: task.tldr,
-            description: task.description,
-            created_at: task.createdAt,
-            priority: task.settings.priority,
-            tags: task.settings.tags,
-            due_date: task.settings.dueDate,
-            status: task.settings.status,
-            completed: task.settings.completed,
-            extendedData: task.extendedData,
-            position,
-          }
-
-          return {
-            standaloneTasks: [...state.standaloneTasks, task],
-          }
+        const newTask = {
+          id: uuidv4(),
+          heading: taskHeading,
+          tldr: taskTldr,
+          description: taskDescription,
+          settings: { ...defaultTaskSettings, ...(taskSettings || {}) },
+          extendedData: { ...defaultExtendedData },
+          timeline: [createTimelineEntry('Task created')],
+          createdAt: new Date().toISOString(),
         }
 
-        // Otherwise, add task to board/column as before
+        if (!boardId || !columnId) {
+          return { standaloneTasks: [newTask, ...state.standaloneTasks] }
+        }
+
         return {
           boards: state.boards.map((board) => {
-            if (board.id !== boardId) {
-              return board
-            }
-
+            if (board.id !== boardId) return board
             return {
               ...board,
               columns: board.columns.map((column) => {
-                if (column.id !== columnId) {
-                  return column
-                }
-
-                position = column.tasks.length
-
-                const isDoneColumn = column.title.toLowerCase() === 'done'
-                const task = {
-                  id: taskId,
-                  heading: payload.heading?.trim() || 'Untitled Task',
-                  tldr: payload.tldr?.trim() || '',
-                  description: payload.description?.trim() || '',
-                  createdAt,
-                  settings: {
-                    ...defaultTaskSettings,
-                    ...payload.settings,
-                    status: column.title,
-                    completed: isDoneColumn ? true : (payload.settings?.completed ?? defaultTaskSettings.completed),
-                  },
-                  extendedData: { ...defaultExtendedData, ...(payload.extendedData || {}) },
-                  timeline: [createTimelineEntry(`Created in ${column.title}${isDoneColumn ? ' (marked as completed)' : ''}`)],
-                }
-
-                taskForApi = {
-                  id: task.id,
-                  board_id: boardId,
-                  column_id: columnId,
-                  heading: task.heading,
-                  tldr: task.tldr,
-                  description: task.description,
-                  created_at: task.createdAt,
-                  priority: task.settings.priority,
-                  tags: task.settings.tags,
-                  due_date: task.settings.dueDate,
-                  status: task.settings.status,
-                  completed: task.settings.completed,
-                  extendedData: task.extendedData,
-                  position,
-                }
-
+                if (column.id !== columnId) return column
                 return {
                   ...column,
-                  tasks: [...column.tasks, task],
+                  tasks: [newTask, ...column.tasks],
                 }
               }),
             }
           }),
         }
       })
-
-      if (taskForApi && window.electronAPI?.createTask) {
-        window.electronAPI.createTask(taskForApi).catch(err => {
-          console.error('[Store] Error calling task:create', err)
-          // Here we could implement a rollback logic if needed
-        })
-      }
-
       return result
     },
 
     removeTask: (boardId, columnId, taskId) => {
       const result = set((state) => {
-        // Handle standalone tasks (no boardId or columnId)
         if (!boardId || !columnId) {
+          let removedSnapshot = null
           const targetTask = state.standaloneTasks.find((task) => task.id === taskId)
           if (targetTask) {
-            const removedSnapshot = {
+            removedSnapshot = {
               boardId: null,
-              boardName: 'No Board',
+              boardName: 'Standalone',
               columnId: null,
-              columnTitle: 'Standalone',
+              columnTitle: null,
               task: {
                 ...targetTask,
                 timeline: [
                   ...targetTask.timeline,
-                  createTimelineEntry('Deleted standalone task'),
+                  createTimelineEntry('Deleted from Standalone'),
                 ],
               },
               deletedAt: new Date().toISOString(),
             }
-            return {
-              standaloneTasks: state.standaloneTasks.filter((task) => task.id !== taskId),
-              deletedTasks: [removedSnapshot, ...state.deletedTasks],
-              selectedTask:
-                state.selectedTask &&
-                state.selectedTask.taskId === taskId &&
-                !state.selectedTask.boardId
-                  ? null
-                  : state.selectedTask,
-            }
           }
-          return state
+          return {
+            standaloneTasks: state.standaloneTasks.filter((task) => task.id !== taskId),
+            deletedTasks: removedSnapshot
+              ? [removedSnapshot, ...state.deletedTasks]
+              : state.deletedTasks,
+          }
         }
 
-        // Handle board tasks
-        return {
-          ...(() => {
-            let removedSnapshot = null
-
-            const nextBoards = state.boards.map((board) => {
-              if (board.id !== boardId) {
-                return board
+        let removedSnapshot = null
+        const nextBoards = state.boards.map((board) => {
+          if (board.id !== boardId) return board
+          return {
+            ...board,
+            columns: board.columns.map((column) => {
+              if (column.id !== columnId) return column
+              const targetTask = column.tasks.find((task) => task.id === taskId)
+              if (targetTask) {
+                removedSnapshot = {
+                  boardId: board.id,
+                  boardName: board.name,
+                  columnId: column.id,
+                  columnTitle: column.title,
+                  task: {
+                    ...targetTask,
+                    timeline: [
+                      ...targetTask.timeline,
+                      createTimelineEntry(`Deleted from ${column.title}`),
+                    ],
+                  },
+                  deletedAt: new Date().toISOString(),
+                }
               }
-
               return {
-                ...board,
-                columns: board.columns.map((column) => {
-                  if (column.id !== columnId) {
-                    return column
-                  }
-
-                  const targetTask = column.tasks.find((task) => task.id === taskId)
-                  if (targetTask) {
-                    removedSnapshot = {
-                      boardId: board.id,
-                      boardName: board.name,
-                      columnId: column.id,
-                      columnTitle: column.title,
-                      task: {
-                        ...targetTask,
-                        timeline: [
-                          ...targetTask.timeline,
-                          createTimelineEntry(`Deleted from ${column.title}`),
-                        ],
-                      },
-                      deletedAt: new Date().toISOString(),
-                    }
-                  }
-
-                  return {
-                    ...column,
-                    tasks: column.tasks.filter((task) => task.id !== taskId),
-                  }
-                }),
+                ...column,
+                tasks: column.tasks.filter((task) => task.id !== taskId),
               }
-            })
+            }),
+          }
+        })
 
-            const nextDeletedTasks = removedSnapshot
-              ? [removedSnapshot, ...state.deletedTasks]
-              : state.deletedTasks
-
-            return {
-              boards: nextBoards,
-              deletedTasks: nextDeletedTasks,
-            }
-          })(),
+        return {
+          boards: nextBoards,
+          deletedTasks: removedSnapshot
+            ? [removedSnapshot, ...state.deletedTasks]
+            : state.deletedTasks,
           selectedTask:
             state.selectedTask &&
             state.selectedTask.boardId === boardId &&
@@ -682,24 +387,15 @@ export const useStore = create(
               : state.selectedTask,
         }
       })
-
-      if (window.electronAPI?.deleteTask) {
-        window.electronAPI.deleteTask(taskId)
-      }
-
       return result
     },
 
     updateTask: (boardId, columnId, taskId, updates) => {
       const result = set((state) => {
-        // Handle standalone tasks (no boardId or columnId)
         if (!boardId || !columnId) {
           return {
             standaloneTasks: state.standaloneTasks.map((task) => {
-              if (task.id !== taskId) {
-                return task
-              }
-
+              if (task.id !== taskId) return task
               const action = describeTaskUpdate(task, updates)
               return {
                 ...task,
@@ -712,27 +408,17 @@ export const useStore = create(
           }
         }
 
-        // Handle board tasks
         return {
           boards: state.boards.map((board) => {
-            if (board.id !== boardId) {
-              return board
-            }
-
+            if (board.id !== boardId) return board
             return {
               ...board,
               columns: board.columns.map((column) => {
-                if (column.id !== columnId) {
-                  return column
-                }
-
+                if (column.id !== columnId) return column
                 return {
                   ...column,
                   tasks: column.tasks.map((task) => {
-                    if (task.id !== taskId) {
-                      return task
-                    }
-
+                    if (task.id !== taskId) return task
                     const action = describeTaskUpdate(task, updates)
                     return {
                       ...task,
@@ -748,15 +434,6 @@ export const useStore = create(
           }),
         }
       })
-
-      if (window.electronAPI?.updateTask) {
-        const apiUpdates = { ...updates }
-        if (!boardId || !columnId) {
-          apiUpdates.isStandalone = true
-        }
-        window.electronAPI.updateTask(taskId, apiUpdates)
-      }
-
       return result
     },
 
@@ -765,42 +442,22 @@ export const useStore = create(
         if (!boardId) {
           const taskToMove = state.standaloneTasks.find((t) => t.id === taskId)
           if (!taskToMove) return state
-
           const nextStandalone = state.standaloneTasks.filter((t) => t.id !== taskId)
-          const insertAt =
-            typeof targetIndex === 'number'
-              ? Math.max(0, Math.min(targetIndex, nextStandalone.length))
-              : nextStandalone.length
-
+          const insertAt = typeof targetIndex === 'number'
+            ? Math.max(0, Math.min(targetIndex, nextStandalone.length))
+            : nextStandalone.length
           nextStandalone.splice(insertAt, 0, taskToMove)
           return { standaloneTasks: nextStandalone }
         }
 
         return {
           boards: state.boards.map((board) => {
-            if (board.id !== boardId) {
-              return board
-            }
-
-            const sourceColumn = board.columns.find((column) => column.id === sourceColumnId)
-            const targetColumn = board.columns.find((column) => column.id === targetColumnId)
-
-            if (!sourceColumn || !targetColumn) {
-              return board
-            }
-
-            const taskToMove = sourceColumn.tasks.find((task) => task.id === taskId)
-            if (!taskToMove) {
-              return board
-            }
-
-            if (sourceColumnId === targetColumnId) {
-              // This implementation doesn't handle reordering within the same column,
-              // as the backend `move` is also for changing columns.
-              // For now, we just return the board as is.
-              return board
-            }
-
+            if (board.id !== boardId) return board
+            const sourceColumn = board.columns.find((c) => c.id === sourceColumnId)
+            const targetColumn = board.columns.find((c) => c.id === targetColumnId)
+            if (!sourceColumn || !targetColumn) return board
+            const taskToMove = sourceColumn.tasks.find((t) => t.id === taskId)
+            if (!taskToMove) return board
             const isDoneColumn = targetColumn.title.toLowerCase() === 'done'
             const taskWithTimeline = {
               ...taskToMove,
@@ -811,631 +468,34 @@ export const useStore = create(
               },
               timeline: [
                 ...taskToMove.timeline,
-                createTimelineEntry(
-                  `Moved from ${sourceColumn.title} to ${targetColumn.title}${
-                    isDoneColumn ? ' (marked as completed)' : ''
-                  }`,
-                ),
+                createTimelineEntry(`Moved from ${sourceColumn.title} to ${targetColumn.title}`),
               ],
             }
-
             return {
               ...board,
               columns: board.columns.map((column) => {
                 if (column.id === sourceColumnId) {
-                  return {
-                    ...column,
-                    tasks: column.tasks.filter((task) => task.id !== taskId),
-                  }
+                  return { ...column, tasks: column.tasks.filter((t) => t.id !== taskId) }
                 }
-
                 if (column.id === targetColumnId) {
                   const copy = [...column.tasks]
-                  const insertAt =
-                    typeof targetIndex === 'number'
-                      ? Math.max(0, Math.min(targetIndex, copy.length))
-                      : copy.length
-
+                  const insertAt = typeof targetIndex === 'number'
+                    ? Math.max(0, Math.min(targetIndex, copy.length))
+                    : copy.length
                   copy.splice(insertAt, 0, taskWithTimeline)
-                  
-                  // Sync with native backend if available
-                  if (window.electronAPI?.moveTask) {
-                    window.electronAPI.moveTask(taskId, boardId, targetColumnId, insertAt)
-                  }
-
-                  return {
-                    ...column,
-                    tasks: copy,
-                  }
+                  return { ...column, tasks: copy }
                 }
-
                 return column
               }),
             }
           }),
         }
       })
-
-      return result
-    },
-
-    // Move a task from any source (standalone or board/column) to any target (standalone or board/column).
-    moveTaskToBoard: (sourceBoardId, sourceColumnId, taskId, targetBoardId, targetColumnId) => {
-      const result = set((state) => {
-        // Resolve source task (from standalone or from board)
-        let taskToMove = null
-        if (!sourceBoardId || !sourceColumnId) {
-          taskToMove = state.standaloneTasks.find((t) => t.id === taskId) ?? null
-        } else {
-          const board = state.boards.find((b) => b.id === sourceBoardId)
-          const column = board?.columns.find((c) => c.id === sourceColumnId)
-          taskToMove = column?.tasks.find((t) => t.id === taskId) ?? null
-        }
-        if (!taskToMove) {
-          return state
-        }
-
-        const targetBoard = state.boards.find((b) => b.id === targetBoardId)
-        const targetCol = targetBoard?.columns.find((c) => c.id === targetColumnId)
-        const isTargetStandalone = !targetBoardId || !targetColumnId
-        const isDoneColumn = targetCol?.title.toLowerCase() === 'done'
-        const moveEntry = isTargetStandalone
-          ? createTimelineEntry('Moved to standalone')
-          : (() => {
-              const colTitle = targetCol?.title ?? 'Unknown'
-              const boardName = targetBoard?.name ?? 'Unknown'
-              return createTimelineEntry(
-                `Moved to ${boardName} / ${colTitle}${
-                  isDoneColumn ? ' (marked as completed)' : ''
-                }`,
-              )
-            })()
-
-        const taskWithTimeline = {
-          ...taskToMove,
-          settings: {
-            ...taskToMove.settings,
-            ...(isTargetStandalone
-              ? {}
-              : {
-                  status: targetCol?.title ?? 'To Do',
-                  completed: isDoneColumn ? true : taskToMove.settings.completed,
-                }),
-          },
-          timeline: [...taskToMove.timeline, moveEntry],
-        }
-
-        // Remove from source
-        let nextStandalone = state.standaloneTasks
-        let nextBoards = state.boards
-
-        if (!sourceBoardId || !sourceColumnId) {
-          nextStandalone = state.standaloneTasks.filter((t) => t.id !== taskId)
-        } else {
-          nextBoards = state.boards.map((board) => {
-            if (board.id !== sourceBoardId) return board
-            return {
-              ...board,
-              columns: board.columns.map((col) =>
-                col.id !== sourceColumnId
-                  ? col
-                  : { ...col, tasks: col.tasks.filter((t) => t.id !== taskId) },
-              ),
-            }
-          })
-        }
-
-        // Add to target
-        if (isTargetStandalone) {
-          nextStandalone = [...nextStandalone, taskWithTimeline]
-        } else {
-          nextBoards = nextBoards.map((board) => {
-            if (board.id !== targetBoardId) return board
-            return {
-              ...board,
-              columns: board.columns.map((column) => {
-                if (column.id !== targetColumnId) return column
-                return {
-                  ...column,
-                  tasks: [...column.tasks, taskWithTimeline],
-                }
-              }),
-            }
-          })
-        }
-
-        return {
-          boards: nextBoards,
-          standaloneTasks: nextStandalone,
-          selectedTask:
-            state.selectedTask &&
-            state.selectedTask.taskId === taskId &&
-            state.selectedTask.boardId === sourceBoardId &&
-            state.selectedTask.columnId === sourceColumnId
-              ? { boardId: targetBoardId, columnId: targetColumnId, taskId }
-              : state.selectedTask,
-        }
-      })
-
-      setTimeout(() => {
-        const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) return
-        try {
-          if (window.electronAPI?.saveBoards) {
-            window.electronAPI.saveBoards(
-              currentState.boards,
-              currentState.activeBoardId,
-              currentState.standaloneTasks,
-            )
-          } else {
-            localStorage.setItem(
-              'todo_boards',
-              JSON.stringify({
-                boards: currentState.boards,
-                standaloneTasks: currentState.standaloneTasks,
-                activeBoardId: currentState.activeBoardId,
-              }),
-            )
-          }
-        } catch (error) {
-          console.error('[Store] Error in direct save after moveTaskToBoard:', error)
-        }
-      }, 100)
-      return result
-    },
-
-    updateTaskChecklist: (boardId, columnId, taskId, checklistId, updates) => {
-      const result = set((state) => {
-        const updateTaskFn = (task) => {
-          if (task.id !== taskId) return task
-          return {
-            ...task,
-            extendedData: {
-              ...task.extendedData,
-              checklists: task.extendedData.checklists.map((item) =>
-                item.id === checklistId ? { ...item, ...updates } : item,
-              ),
-            },
-          }
-        }
-
-        if (!boardId || !columnId) {
-          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
-        }
-
-        return {
-          boards: state.boards.map((board) => {
-            if (board.id !== boardId) return board
-            return {
-              ...board,
-              columns: board.columns.map((column) => {
-                if (column.id !== columnId) return column
-                return {
-                  ...column,
-                  tasks: column.tasks.map(updateTaskFn),
-                }
-              }),
-            }
-          }),
-        }
-      })
-
-      setTimeout(() => {
-        const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) return
-        try {
-          if (window.electronAPI?.saveBoards) {
-            window.electronAPI.saveBoards(
-              currentState.boards,
-              currentState.activeBoardId,
-              currentState.standaloneTasks,
-            )
-          } else {
-            localStorage.setItem(
-              'todo_boards',
-              JSON.stringify({
-                boards: currentState.boards,
-                standaloneTasks: currentState.standaloneTasks,
-                activeBoardId: currentState.activeBoardId,
-              }),
-            )
-          }
-        } catch (error) {
-          console.error('[Store] Error in direct save after updateTaskChecklist:', error)
-        }
-      }, 100)
-      return result
-    },
-
-    addTaskChecklistItem: (boardId, columnId, taskId) => {
-      const result = set((state) => {
-        const updateTaskFn = (task) => {
-          if (task.id !== taskId) return task
-          return {
-            ...task,
-            extendedData: {
-              ...task.extendedData,
-              checklists: [
-                ...task.extendedData.checklists,
-                { id: uuidv4(), text: '', completed: false },
-              ],
-            },
-          }
-        }
-
-        if (!boardId || !columnId) {
-          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
-        }
-
-        return {
-          boards: state.boards.map((board) => {
-            if (board.id !== boardId) return board
-            return {
-              ...board,
-              columns: board.columns.map((column) => {
-                if (column.id !== columnId) return column
-                return {
-                  ...column,
-                  tasks: column.tasks.map(updateTaskFn),
-                }
-              }),
-            }
-          }),
-        }
-      })
-
-      setTimeout(() => {
-        const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) return
-        try {
-          if (window.electronAPI?.saveBoards) {
-            window.electronAPI.saveBoards(
-              currentState.boards,
-              currentState.activeBoardId,
-              currentState.standaloneTasks,
-            )
-          } else {
-            localStorage.setItem(
-              'todo_boards',
-              JSON.stringify({
-                boards: currentState.boards,
-                standaloneTasks: currentState.standaloneTasks,
-                activeBoardId: currentState.activeBoardId,
-              }),
-            )
-          }
-        } catch (error) {
-          console.error('[Store] Error in direct save after addTaskChecklistItem:', error)
-        }
-      }, 100)
-      return result
-    },
-
-    removeTaskChecklistItem: (boardId, columnId, taskId, checklistId) => {
-      const result = set((state) => {
-        const updateTaskFn = (task) => {
-          if (task.id !== taskId) return task
-          return {
-            ...task,
-            extendedData: {
-              ...task.extendedData,
-              checklists: task.extendedData.checklists.filter((item) => item.id !== checklistId),
-            },
-          }
-        }
-
-        if (!boardId || !columnId) {
-          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
-        }
-
-        return {
-          boards: state.boards.map((board) => {
-            if (board.id !== boardId) return board
-            return {
-              ...board,
-              columns: board.columns.map((column) => {
-                if (column.id !== columnId) return column
-                return {
-                  ...column,
-                  tasks: column.tasks.map(updateTaskFn),
-                }
-              }),
-            }
-          }),
-        }
-      })
-
-      setTimeout(() => {
-        const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) return
-        try {
-          if (window.electronAPI?.saveBoards) {
-            window.electronAPI.saveBoards(
-              currentState.boards,
-              currentState.activeBoardId,
-              currentState.standaloneTasks,
-            )
-          } else {
-            localStorage.setItem(
-              'todo_boards',
-              JSON.stringify({
-                boards: currentState.boards,
-                standaloneTasks: currentState.standaloneTasks,
-                activeBoardId: currentState.activeBoardId,
-              }),
-            )
-          }
-        } catch (error) {
-          console.error('[Store] Error in direct save after removeTaskChecklistItem:', error)
-        }
-      }, 100)
-      return result
-    },
-
-    addTaskAttachment: (boardId, columnId, taskId, attachment) => {
-      const result = set((state) => {
-        const updateTaskFn = (task) => {
-          if (task.id !== taskId) return task
-          return {
-            ...task,
-            extendedData: {
-              ...task.extendedData,
-              attachments: [
-                ...task.extendedData.attachments,
-                {
-                  id: uuidv4(),
-                  createdAt: new Date().toISOString(),
-                  ...attachment,
-                },
-              ],
-            },
-          }
-        }
-
-        if (!boardId || !columnId) {
-          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
-        }
-
-        return {
-          boards: state.boards.map((board) => {
-            if (board.id !== boardId) return board
-            return {
-              ...board,
-              columns: board.columns.map((column) => {
-                if (column.id !== columnId) return column
-                return {
-                  ...column,
-                  tasks: column.tasks.map(updateTaskFn),
-                }
-              }),
-            }
-          }),
-        }
-      })
-
-      setTimeout(() => {
-        const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) return
-        try {
-          if (window.electronAPI?.saveBoards) {
-            window.electronAPI.saveBoards(
-              currentState.boards,
-              currentState.activeBoardId,
-              currentState.standaloneTasks,
-            )
-          } else {
-            localStorage.setItem(
-              'todo_boards',
-              JSON.stringify({
-                boards: currentState.boards,
-                standaloneTasks: currentState.standaloneTasks,
-                activeBoardId: currentState.activeBoardId,
-              }),
-            )
-          }
-        } catch (error) {
-          console.error('[Store] Error in direct save after addTaskAttachment:', error)
-        }
-      }, 100)
-      return result
-    },
-
-    removeTaskAttachment: (boardId, columnId, taskId, attachmentId) => {
-      const result = set((state) => {
-        const updateTaskFn = (task) => {
-          if (task.id !== taskId) return task
-          return {
-            ...task,
-            extendedData: {
-              ...task.extendedData,
-              attachments: task.extendedData.attachments.filter((a) => a.id !== attachmentId),
-            },
-          }
-        }
-
-        if (!boardId || !columnId) {
-          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
-        }
-
-        return {
-          boards: state.boards.map((board) => {
-            if (board.id !== boardId) return board
-            return {
-              ...board,
-              columns: board.columns.map((column) => {
-                if (column.id !== columnId) return column
-                return {
-                  ...column,
-                  tasks: column.tasks.map(updateTaskFn),
-                }
-              }),
-            }
-          }),
-        }
-      })
-
-      setTimeout(() => {
-        const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) return
-        try {
-          if (window.electronAPI?.saveBoards) {
-            window.electronAPI.saveBoards(
-              currentState.boards,
-              currentState.activeBoardId,
-              currentState.standaloneTasks,
-            )
-          } else {
-            localStorage.setItem(
-              'todo_boards',
-              JSON.stringify({
-                boards: currentState.boards,
-                standaloneTasks: currentState.standaloneTasks,
-                activeBoardId: currentState.activeBoardId,
-              }),
-            )
-          }
-        } catch (error) {
-          console.error('[Store] Error in direct save after removeTaskAttachment:', error)
-        }
-      }, 100)
-      return result
-    },
-
-    addTaskComment: (boardId, columnId, taskId, text) => {
-      if (!text?.trim()) return
-
-      const result = set((state) => {
-        const updateTaskFn = (task) => {
-          if (task.id !== taskId) return task
-          return {
-            ...task,
-            extendedData: {
-              ...task.extendedData,
-              comments: [
-                ...(task.extendedData.comments || []),
-                {
-                  id: uuidv4(),
-                  text: text.trim(),
-                  createdAt: new Date().toISOString(),
-                },
-              ],
-            },
-          }
-        }
-
-        if (!boardId || !columnId) {
-          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
-        }
-
-        return {
-          boards: state.boards.map((board) => {
-            if (board.id !== boardId) return board
-            return {
-              ...board,
-              columns: board.columns.map((column) => {
-                if (column.id !== columnId) return column
-                return {
-                  ...column,
-                  tasks: column.tasks.map(updateTaskFn),
-                }
-              }),
-            }
-          }),
-        }
-      })
-
-      setTimeout(() => {
-        const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) return
-        try {
-          if (window.electronAPI?.saveBoards) {
-            window.electronAPI.saveBoards(
-              currentState.boards,
-              currentState.activeBoardId,
-              currentState.standaloneTasks,
-            )
-          } else {
-            localStorage.setItem(
-              'todo_boards',
-              JSON.stringify({
-                boards: currentState.boards,
-                standaloneTasks: currentState.standaloneTasks,
-                activeBoardId: currentState.activeBoardId,
-              }),
-            )
-          }
-        } catch (error) {
-          console.error('[Store] Error in direct save after addTaskComment:', error)
-        }
-      }, 100)
-      return result
-    },
-
-    removeTaskComment: (boardId, columnId, taskId, commentId) => {
-      const result = set((state) => {
-        const updateTaskFn = (task) => {
-          if (task.id !== taskId) return task
-          return {
-            ...task,
-            extendedData: {
-              ...task.extendedData,
-              comments: (task.extendedData.comments || []).filter((c) => c.id !== commentId),
-            },
-          }
-        }
-
-        if (!boardId || !columnId) {
-          return { standaloneTasks: state.standaloneTasks.map(updateTaskFn) }
-        }
-
-        return {
-          boards: state.boards.map((board) => {
-            if (board.id !== boardId) return board
-            return {
-              ...board,
-              columns: board.columns.map((column) => {
-                if (column.id !== columnId) return column
-                return {
-                  ...column,
-                  tasks: column.tasks.map(updateTaskFn),
-                }
-              }),
-            }
-          }),
-        }
-      })
-
-      setTimeout(() => {
-        const currentState = useStore.getState()
-        if (!currentState.hydrationComplete) return
-        try {
-          if (window.electronAPI?.saveBoards) {
-            window.electronAPI.saveBoards(
-              currentState.boards,
-              currentState.activeBoardId,
-              currentState.standaloneTasks,
-            )
-          } else {
-            localStorage.setItem(
-              'todo_boards',
-              JSON.stringify({
-                boards: currentState.boards,
-                standaloneTasks: currentState.standaloneTasks,
-                activeBoardId: currentState.activeBoardId,
-              }),
-            )
-          }
-        } catch (error) {
-          console.error('[Store] Error in direct save after removeTaskComment:', error)
-        }
-      }, 100)
       return result
     },
 
     openTaskDetail: (boardId, columnId, taskId) =>
-      set({
-        selectedTask: { boardId, columnId, taskId },
-      }),
+      set({ selectedTask: { boardId, columnId, taskId } }),
 
     closeTaskDetail: () => set({ selectedTask: null }),
 
@@ -1486,47 +546,25 @@ export const useStore = create(
 )
 
 export const attachBoardPersistence = () => {
-  if (persistenceAttached) {
-    return
-  }
-
+  if (persistenceAttached) return
   persistenceAttached = true
 
-  // Helper function to save boards (Electron SQLite or localStorage fallback)
   const saveBoardsToDisk = () => {
     try {
       const state = useStore.getState()
-      if (!state.hydrationComplete) {
-        console.log('[Store] Skipping save - hydration not complete')
-        return false
-      }
+      if (!state.hydrationComplete) return false
       const activeBoardId = state.activeBoardId
       if (window.electronAPI?.saveBoards) {
-        console.log('[Store] saveBoardsToDisk: Saving via Electron API:', {
-          boardsCount: state.boards.length,
-          standaloneTasksCount: state.standaloneTasks.length,
-          activeBoardId,
-        })
         window.electronAPI.saveBoards(state.boards, activeBoardId, state.standaloneTasks)
       } else {
-        try {
-          console.log('[Store] saveBoardsToDisk: Saving to localStorage:', {
-            boardsCount: state.boards.length,
-            standaloneTasksCount: state.standaloneTasks.length,
+        localStorage.setItem(
+          'todo_boards',
+          JSON.stringify({
+            boards: state.boards,
+            standaloneTasks: state.standaloneTasks,
             activeBoardId,
-          })
-          localStorage.setItem(
-            'todo_boards',
-            JSON.stringify({
-              boards: state.boards,
-              standaloneTasks: state.standaloneTasks,
-              activeBoardId,
-            }),
-          )
-        } catch (e) {
-          console.error('[Store] localStorage save failed:', e)
-          return false
-        }
+          }),
+        )
       }
       return true
     } catch (error) {
@@ -1535,7 +573,6 @@ export const attachBoardPersistence = () => {
     }
   }
 
-  // Sync activeBoardId to uiSettings.activeBoardId and save whenever it changes
   useStore.subscribe(
     (state) => state.activeBoardId,
     (activeBoardId) => {
@@ -1543,41 +580,27 @@ export const attachBoardPersistence = () => {
         activeBoardIdFirstEmit = false
         return
       }
-      if (!useStore.getState().hydrationComplete) {
-        return
-      }
+      if (!useStore.getState().hydrationComplete) return
       const currentSettings = useStore.getState().uiSettings
       if (currentSettings.activeBoardId !== activeBoardId) {
-        useStore.setState({
-          uiSettings: {
-            ...currentSettings,
-            activeBoardId,
-          },
-        })
+        useStore.setState({ uiSettings: { ...currentSettings, activeBoardId } })
       }
-      // Also save boards with the new activeBoardId
       saveBoardsToDisk()
     },
   )
 
-  // Only persist after hydration is complete to avoid overwriting loaded data
-  // Skip the first emission which happens when subscription is attached (during hydration)
   useStore.subscribe(
     (state) => state.boards,
     () => {
-      // Skip the first emission and only persist after hydration is complete
       if (boardsFirstEmit) {
         boardsFirstEmit = false
         return
       }
-      if (!useStore.getState().hydrationComplete) {
-        return
-      }
+      if (!useStore.getState().hydrationComplete) return
       saveBoardsToDisk()
     },
   )
 
-  // Also persist when standaloneTasks change
   let standaloneTasksFirstEmit = true
   useStore.subscribe(
     (state) => state.standaloneTasks,
@@ -1586,9 +609,7 @@ export const attachBoardPersistence = () => {
         standaloneTasksFirstEmit = false
         return
       }
-      if (!useStore.getState().hydrationComplete) {
-        return
-      }
+      if (!useStore.getState().hydrationComplete) return
       saveBoardsToDisk()
     },
   )
@@ -1600,9 +621,7 @@ export const attachBoardPersistence = () => {
         deletedTasksFirstEmit = false
         return
       }
-      if (!useStore.getState().hydrationComplete) {
-        return
-      }
+      if (!useStore.getState().hydrationComplete) return
       try {
         if (window.electronAPI?.saveDeletedTasks) {
           window.electronAPI.saveDeletedTasks(deletedTasks)
@@ -1622,9 +641,7 @@ export const attachBoardPersistence = () => {
         settingsFirstEmit = false
         return
       }
-      if (!useStore.getState().hydrationComplete) {
-        return
-      }
+      if (!useStore.getState().hydrationComplete) return
       try {
         if (window.electronAPI?.saveSettings) {
           window.electronAPI.saveSettings(uiSettings)
@@ -1636,5 +653,4 @@ export const attachBoardPersistence = () => {
       }
     },
   )
-
 }

@@ -6,7 +6,7 @@ import {
   HardDrive,
   LayoutDashboard,
   Settings,
-  StickyNote,
+  Search, StickyNote,
   User,
   X,
 } from 'lucide-react'
@@ -16,10 +16,9 @@ const navItems = [
   { id: 'boards', label: 'Boards', icon: LayoutDashboard },
   { id: 'tasks', label: 'My Tasks', icon: CheckCircle2 },
   { id: 'calendar', label: 'Calendar', icon: CalendarDays },
-  { id: 'notes', label: 'Notes', icon: StickyNote },
 ]
 
-export default function AppSidebar({ activeView, onChangeView }) {
+export default function AppSidebar({ activeView, onChangeView, onSearchClick }) {
   const {
     notifications,
     unreadCount,
@@ -108,6 +107,17 @@ export default function AppSidebar({ activeView, onChangeView }) {
 
       {/* Main navigation */}
       <nav className="flex flex-1 flex-col items-center gap-3 w-full px-2">
+        <button
+          type="button"
+          onClick={onSearchClick}
+          className="group relative flex h-12 w-12 items-center justify-center rounded-lg transition-all text-text-muted hover:bg-surface-light hover:text-primary"
+          title="Search"
+        >
+          <Search className="h-6 w-6" />
+          <div className="absolute left-14 z-50 whitespace-nowrap rounded bg-surface-light px-2 py-1 text-xs text-white opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity shadow-lg border border-border">
+            Search
+          </div>
+        </button>
         {navItems.map((item) => {
           const Icon = item.icon
           const isActive = item.id === activeView
